@@ -31,6 +31,7 @@ fun NfcScreen(
     val foundKeys by nfcViewModel.foundKeys.collectAsState()
     val isAttacking by nfcViewModel.isAttacking.collectAsState()
     val cloneArmed by nfcViewModel.cloneArmed.collectAsState()
+    val emuCaptureArmed by nfcViewModel.emuCaptureArmed.collectAsState()
     var showHistory by remember { mutableStateOf(false) }
     var showLogs by remember { mutableStateOf(false) }
     var cloneUid by remember { mutableStateOf("") }
@@ -133,6 +134,37 @@ fun NfcScreen(
                             }
                         }
                     }
+                }
+            }
+            // Section Émulation HCE (capture d'une carte ISO-DEP)
+            Card(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Card Emulation (ISO-DEP)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    if (emuCaptureArmed) {
+                        Text(
+                            "Armed — tap an ISO-DEP card to capture it…",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        OutlinedButton(
+                            onClick = { nfcViewModel.cancelEmulationCapture() },
+                            modifier = Modifier.padding(top = 4.dp)
+                        ) { Text("Cancel") }
+                    } else {
+                        Button(onClick = { nfcViewModel.armEmulationCapture() }) {
+                            Text("Capture ISO-DEP card for emulation")
+                        }
+                    }
+                    Text(
+                        "Records the card's APDU dialog so the phone can replay it via HCE " +
+                            "(see the Card Emulation screen). ISO-DEP only — Mifare Classic can't be " +
+                            "emulated (use Clone above); not usable for EMV payment.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
                 }
             }
             // Section NDEF (lecture)

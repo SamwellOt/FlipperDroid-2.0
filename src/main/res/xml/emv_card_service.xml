@@ -4,4 +4,9 @@
     <aid-group android:category="payment" android:description="@string/emv_card_service_desc">
         <aid-filter android:name="A0000000031010" /> <!-- Visa -->
     </aid-group>
+    <!-- Groupe "other" : placeholder statique ; les AID des cartes ISO-DEP capturées
+         sont ajoutés dynamiquement via CardEmulation.registerAidsForService(). -->
+    <aid-group android:category="other" android:description="@string/emv_card_service_desc">
+        <aid-filter android:name="F0010203040506" />
+    </aid-group>
 </host-apdu-service> 

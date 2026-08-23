@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.example.flipperdroid.nfc.ApduCapture
+import com.example.flipperdroid.nfc.EmulationStore
 import com.example.flipperdroid.nfc.MifareClassicUtils
 import java.io.File
 import java.text.SimpleDateFormat
@@ -54,6 +56,10 @@ class NfcViewModel(app: Application) : AndroidViewModel(app) {
     private var cloneWriteTrailers = false
     private var cloneWriteSectorZero = true
 
+    // Capture d'émulation HCE : quand "armé", la prochaine carte ISO-DEP est capturée.
+    private val _emuCaptureArmed = MutableStateFlow(false)
+    val emuCaptureArmed: StateFlow<Boolean> = _emuCaptureArmed.asStateFlow()
+
     // Dernier tag scanné (nécessaire pour l'attaque, le clone, le NDEF)
     private var lastTag: Tag? = null
 
@@ -64,6 +70,8 @@ class NfcViewModel(app: Application) : AndroidViewModel(app) {
         lastTag = tag
         // Si un clone est armé, la carte présentée est la CIBLE : on y réécrit le dump.
         if (_cloneArmed.value) { performClone(tag); return }
+        // Si une capture d'émulation est armée, on enregistre le dialogue APDU de la carte.
+        if (_emuCaptureArmed.value) { performEmulationCapture(tag); return }
         _foundKeys.value = emptyList()
         _ndefContent.value = null
         // Lecture UID (rapide, ne nécessite pas de connexion)
@@ -300,6 +308,49 @@ class NfcViewModel(app: Application) : AndroidViewModel(app) {
             addLog("Reproduction terminée — ${res.message}")
             pendingCloneDump = null
             _cloneArmed.value = false
+        }
+    }
+
+    /**
+     * Prépare la capture d'émulation HCE : la prochaine carte ISO-DEP présentée verra
+     * son dialogue APDU enregistré, pour être rejoué ensuite par le téléphone.
+     */
+    fun armEmulationCapture() {
+        _emuCaptureArmed.value = true
+        addLog("Capture d'émulation armée : présentez une carte ISO-DEP.")
+    }
+
+    fun cancelEmulationCapture() {
+        _emuCaptureArmed.value = false
+        addLog("Capture d'émulation annulée.")
+    }
+
+    /** Capture le dialogue APDU d'une carte ISO-DEP et le stocke pour l'émulation. */
+    private fun performEmulationCapture(tag: Tag) {
+        _emuCaptureArmed.value = false
+        val iso = android.nfc.tech.IsoDep.get(tag)
+        if (iso == null) {
+            addLog("Émulation impossible : carte non ISO-DEP. Le Mifare Classic ne peut pas être " +
+                "émulé par Android — utilisez le clone physique.")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val result = ApduCapture.probe(iso)
+                if (result.aids.isEmpty()) {
+                    addLog("Aucun AID exploitable : cette carte ISO-DEP n'expose pas de SELECT AID connu " +
+                        "(émulation par replay non applicable).")
+                } else {
+                    val label = "ISO-DEP ${_currentTagUid.value ?: ""} — ${result.aids.size} AID, ${result.map.size} APDU"
+                    EmulationStore.save(getApplication<Application>(), label, result.aids, result.map)
+                    addLog("Carte capturée pour émulation (${result.aids.size} AID, ${result.map.size} réponses). " +
+                        "Ouvrez Card Emulation → Start.")
+                }
+            } catch (e: Exception) {
+                addLog("Erreur capture émulation : ${e.message}")
+            } finally {
+                try { iso.close() } catch (_: Exception) {}
+            }
         }
     }
 
