@@ -36,6 +36,9 @@ class AdvertisementSetQueueHandler(
 
     fun setAdvertisementSets(advertisementSets: List<AdvertisementSet>) { _advertisementSets = advertisementSets; _currentIndex = 0 }
 
+    /** Intervalle entre deux trames de spam (ms). Plus petit = plus agressif. */
+    fun setIntervalMillis(ms: Long) { _intervalMillis = ms.coerceIn(5L, 2000L) }
+
     private fun advertiseNext() {
         if (!_active || _advertisementSets.isEmpty()) return
         val nextSet = when (_advertisementQueueMode) {

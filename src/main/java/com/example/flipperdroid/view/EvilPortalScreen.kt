@@ -3,13 +3,16 @@ package com.example.flipperdroid.view
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -36,6 +39,8 @@ fun EvilPortalScreen(navController: NavController) {
     val password by viewModel.password.collectAsState()
     val status by viewModel.status.collectAsState()
     val captured by viewModel.captured.collectAsState()
+    val template by viewModel.template.collectAsState()
+    val requests by viewModel.requests.collectAsState()
 
     var hasPermission by remember {
         mutableStateOf(
@@ -77,6 +82,27 @@ fun EvilPortalScreen(navController: NavController) {
                 return@Column
             }
 
+            if (!isRunning) {
+                Text("Portal template:", style = MaterialTheme.typography.labelLarge)
+                val templates = listOf(
+                    EvilPortalViewModel.PortalTemplate.GENERIC to "Generic",
+                    EvilPortalViewModel.PortalTemplate.GOOGLE to "Google",
+                    EvilPortalViewModel.PortalTemplate.FACEBOOK to "Facebook",
+                    EvilPortalViewModel.PortalTemplate.FREE_WIFI to "Free WiFi"
+                )
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    templates.forEach { (t, label) ->
+                        Row(
+                            Modifier.padding(end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = template == t, onClick = { viewModel.setTemplate(t) })
+                            Text(label)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
             if (isRunning) {
                 Button(onClick = { viewModel.stop() }) { Text("Stop portal") }
             } else {
@@ -95,6 +121,7 @@ fun EvilPortalScreen(navController: NavController) {
                         Text("SSID: $ssid", fontWeight = FontWeight.Bold)
                         Text("Password: $password", fontFamily = FontFamily.Monospace)
                         Text("Portal: http://192.168.49.1:8080", fontFamily = FontFamily.Monospace)
+                        Text("Requests received: $requests")
                     }
                 }
             }

@@ -2,10 +2,12 @@ package com.example.flipperdroid.viewmodel
 
 import android.annotation.SuppressLint
 import android.app.Application
+import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import com.example.flipperdroid.model.`class`.AdvertisementSetQueueHandler
 import com.example.flipperdroid.model.`object`.BluetoothHelpers
 import com.example.flipperdroid.model.`object`.ContinuityNewDevicePopUpAdvertisementSetGenerator
+import com.example.flipperdroid.model.`object`.ContinuityNearbyActionAdvertisementSetGenerator
 import com.example.flipperdroid.model.`object`.EasySetupWatchAdvertisementSetGenerator
 import com.example.flipperdroid.model.`object`.EasySetupBudsAdvertisementSetGenerator
 import com.example.flipperdroid.model.`object`.SwiftPairAdvertisementSetGenerator
@@ -18,7 +20,14 @@ class BleSpamViewModel(app: Application) : AndroidViewModel(app) {
     enum class BleSpamBrand { APPLE, SAMSUNG, MICROSOFT, GOOGLE, ALL }
     @SuppressLint("StaticFieldLeak")
     private val context = app.applicationContext
-    private val handler = AdvertisementSetQueueHandler(context, BluetoothHelpers.getAdvertisementService(context))
+    // Advertising étendu (API 26+) pour dépasser la limite legacy de 31 octets, sinon legacy.
+    private val handler = AdvertisementSetQueueHandler(
+        context,
+        BluetoothHelpers.getAdvertisementService(
+            context,
+            useLegacy = Build.VERSION.SDK_INT < Build.VERSION_CODES.O
+        )
+    )
     private val _advertisementSets = MutableStateFlow<List<AdvertisementSet>>(emptyList())
     val advertisementSets: StateFlow<List<AdvertisementSet>> = _advertisementSets
     private val _isActive = MutableStateFlow(false)
@@ -29,6 +38,15 @@ class BleSpamViewModel(app: Application) : AndroidViewModel(app) {
     private val _spamLogs = MutableStateFlow<List<String>>(emptyList())
     val spamLogs: StateFlow<List<String>> = _spamLogs
     private var spamCount = 0
+
+    // Vitesse du spam (intervalle en ms entre deux trames) : plus petit = plus agressif.
+    private val _speedMs = MutableStateFlow(20L)
+    val speedMs: StateFlow<Long> = _speedMs
+
+    fun setSpeed(ms: Long) {
+        _speedMs.value = ms
+        handler.setIntervalMillis(ms)
+    }
 
     // Payloads réellement sélectionnés pour le spam (par défaut : tous)
     private var _selectedSets: List<AdvertisementSet> = emptyList()
@@ -58,6 +76,7 @@ class BleSpamViewModel(app: Application) : AndroidViewModel(app) {
             val name = set?.title?.takeIf { it.isNotBlank() } ?: set?.type?.toString() ?: "?"
             _spamLogs.value = (_spamLogs.value + "⚠ FAILED: $name ($error)").takeLast(100)
         }
+        handler.setIntervalMillis(_speedMs.value)
         handler.startSpam(sets)
     }
 
@@ -71,8 +90,8 @@ class BleSpamViewModel(app: Application) : AndroidViewModel(app) {
     private fun loadAdvertisementSets() {
         val sets = when (_brand.value) {
             BleSpamBrand.APPLE -> (
-                ContinuityNewDevicePopUpAdvertisementSetGenerator.getAdvertisementSets()
-                // + autres générateurs Apple à ajouter ici
+                ContinuityNewDevicePopUpAdvertisementSetGenerator.getAdvertisementSets() +
+                    ContinuityNearbyActionAdvertisementSetGenerator.getAdvertisementSets()
             )
             BleSpamBrand.SAMSUNG -> (
                 EasySetupWatchAdvertisementSetGenerator.getAdvertisementSets() + EasySetupBudsAdvertisementSetGenerator.getAdvertisementSets()
@@ -81,6 +100,7 @@ class BleSpamViewModel(app: Application) : AndroidViewModel(app) {
             BleSpamBrand.GOOGLE -> FastPairAdvertisementSetGenerator.getAdvertisementSets()
             BleSpamBrand.ALL -> (
                 ContinuityNewDevicePopUpAdvertisementSetGenerator.getAdvertisementSets()
+                + ContinuityNearbyActionAdvertisementSetGenerator.getAdvertisementSets()
                 + EasySetupWatchAdvertisementSetGenerator.getAdvertisementSets()
                 + EasySetupBudsAdvertisementSetGenerator.getAdvertisementSets()
                 + SwiftPairAdvertisementSetGenerator.getAdvertisementSets()

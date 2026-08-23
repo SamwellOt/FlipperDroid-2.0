@@ -43,6 +43,7 @@ fun BleSpamScreen(
         mutableStateListOf<Boolean>().apply { clear(); addAll(List(advertisementSets.size) { true }) }
     }
     val spamLogs by viewModel.spamLogs.collectAsState()
+    val speedMs by viewModel.speedMs.collectAsState()
 
     // Permissions à demander
     val permissions = mutableListOf(
@@ -181,7 +182,25 @@ fun BleSpamScreen(
                     }
                 }
             }
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(8.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Speed: ${speedMs}ms", Modifier.padding(end = 8.dp))
+                Slider(
+                    value = speedMs.toFloat(),
+                    onValueChange = { viewModel.setSpeed(it.toLong()) },
+                    valueRange = 5f..500f,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Text(
+                "Lower = faster/more aggressive flood.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(8.dp))
             Button(
                 onClick = {
                     viewModel.setCheckedPayloads(checkedStates.toList())

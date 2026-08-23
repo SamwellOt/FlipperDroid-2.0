@@ -38,8 +38,39 @@ class ModernAdvertisementService(
             advertisementSet.advertiseSettings.txPowerLevel = _txPowerLevel!!
             advertisementSet.advertisingSetParameters.txPowerLevel = _txPowerLevel!!
         }
+        // Legacy vs étendu : le legacy plafonne la trame à 31 octets, d'où les échecs
+        // DATA_TOO_LARGE sur Apple Continuity / SwiftPair. On bascule en advertising
+        // ÉTENDU quand le payload dépasse 31 octets et qu'il n'y a pas de scan response
+        // (le scan response n'est pas compatible avec un set étendu non scannable).
+        val hasScanResponse = advertisementSet.scanResponse != null
+        val extendedSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            _bluetoothAdapter?.isLeExtendedAdvertisingSupported == true
+        val params = advertisementSet.advertisingSetParameters
+        if (extendedSupported && !hasScanResponse &&
+            estimateLegacySize(advertisementSet.advertiseData) > 31) {
+            params.legacyMode = false
+            params.connectable = advertisementSet.advertiseSettings.connectable
+            params.scanable = false
+        } else {
+            params.legacyMode = true
+            params.connectable = advertisementSet.advertiseSettings.connectable
+            params.scanable = hasScanResponse
+        }
         advertisementSet.advertisingSetCallback = getAdvertisingSetCallback()
         return advertisementSet
+    }
+
+    /** Estime la taille (octets) d'une trame d'advertising legacy, pour décider legacy/étendu. */
+    private fun estimateLegacySize(data: AdvertiseData): Int {
+        var n = 3 // AD "flags" souvent présent
+        if (data.includeDeviceName) n += 12
+        if (data.includeTxPower) n += 3
+        data.manufacturerData.forEach { n += 4 + it.manufacturerSpecificData.size } // len+type+companyId(2)+data
+        data.services.forEach { s ->
+            n += 4 // service UUID 16 bits (len+type+uuid)
+            s.serviceData?.let { n += 4 + it.size }
+        }
+        return n
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
