@@ -47,6 +47,13 @@ class NfcViewModel(app: Application) : AndroidViewModel(app) {
     private val _isAttacking = MutableStateFlow(false)
     val isAttacking: StateFlow<Boolean> = _isAttacking.asStateFlow()
 
+    // Clonage complet : quand "armé", la prochaine carte présentée reçoit le dump.
+    private val _cloneArmed = MutableStateFlow(false)
+    val cloneArmed: StateFlow<Boolean> = _cloneArmed.asStateFlow()
+    private var pendingCloneDump: List<String>? = null
+    private var cloneWriteTrailers = false
+    private var cloneWriteSectorZero = true
+
     // Dernier tag scanné (nécessaire pour l'attaque, le clone, le NDEF)
     private var lastTag: Tag? = null
 
@@ -55,6 +62,8 @@ class NfcViewModel(app: Application) : AndroidViewModel(app) {
     // sur un thread d'IO pour ne pas bloquer le thread principal (risque d'ANR).
     fun onTagScanned(tag: Tag) {
         lastTag = tag
+        // Si un clone est armé, la carte présentée est la CIBLE : on y réécrit le dump.
+        if (_cloneArmed.value) { performClone(tag); return }
         _foundKeys.value = emptyList()
         _ndefContent.value = null
         // Lecture UID (rapide, ne nécessite pas de connexion)
@@ -254,6 +263,43 @@ class NfcViewModel(app: Application) : AndroidViewModel(app) {
             _isAttacking.value = false
             val cracked = found.count { !it.contains("no key") }
             addLog("Attaque dictionnaire terminée : $cracked/${found.size} secteurs cassés")
+        }
+    }
+
+    /**
+     * Prépare la reproduction : capture le dump courant, puis attend qu'on présente
+     * la carte CIBLE (magic / vierge Mifare Classic) pour y réécrire tous les blocs.
+     */
+    fun armClone(writeTrailers: Boolean = false, writeSectorZero: Boolean = true) {
+        val dump = _currentTagDump.value
+        if (dump.isEmpty() || dump.all { it == MifareClassicUtils.NO_DATA }) {
+            addLog("Aucun dump lisible à cloner (lisez d'abord une carte Mifare Classic).")
+            return
+        }
+        pendingCloneDump = dump
+        cloneWriteTrailers = writeTrailers
+        cloneWriteSectorZero = writeSectorZero
+        _cloneArmed.value = true
+        addLog("Clone armé : présentez maintenant la carte cible (magic/vierge).")
+    }
+
+    /** Annule un clonage armé. */
+    fun cancelClone() {
+        pendingCloneDump = null
+        _cloneArmed.value = false
+        addLog("Clonage annulé.")
+    }
+
+    /** Écrit le dump en attente sur la carte cible présentée. */
+    private fun performClone(tag: Tag) {
+        val dump = pendingCloneDump
+        if (dump.isNullOrEmpty()) { _cloneArmed.value = false; addLog("Aucun dump à cloner."); return }
+        viewModelScope.launch(Dispatchers.IO) {
+            addLog("Écriture du dump sur la carte cible…")
+            val res = MifareClassicUtils.writeDump(tag, dump, cloneWriteTrailers, cloneWriteSectorZero)
+            addLog("Reproduction terminée — ${res.message}")
+            pendingCloneDump = null
+            _cloneArmed.value = false
         }
     }
 

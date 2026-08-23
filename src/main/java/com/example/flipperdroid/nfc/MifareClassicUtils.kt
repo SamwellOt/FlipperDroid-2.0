@@ -102,4 +102,96 @@ object MifareClassicUtils {
             try { mfc.close() } catch (_: Exception) {}
         }
     }
+
+    /** Résultat d'une réécriture de dump complet sur une carte cible. */
+    data class DumpWriteResult(
+        val written: Int,
+        val failed: Int,
+        val skipped: Int,
+        val message: String
+    )
+
+    /**
+     * Réécrit un dump Mifare Classic complet sur la carte présentée (reproduction/clonage).
+     *
+     * @param blocks dump source, un bloc hex (32 caractères) par index global, ou [NO_DATA].
+     * @param writeTrailers réécrire aussi les blocs "sector trailer" (clés + bits d'accès).
+     *   Désactivé par défaut : réécrire un trailer avec de mauvais bits d'accès peut verrouiller
+     *   définitivement le secteur.
+     * @param writeSectorZero tenter d'écrire le bloc 0 (UID) — ne fonctionne que sur cartes "magic".
+     *
+     * NB : ne fonctionne que sur des cartes Mifare Classic inscriptibles (magic/vierges).
+     * Android ne peut PAS émuler du Mifare Classic (HCE = ISO-DEP uniquement).
+     */
+    fun writeDump(
+        tag: Tag,
+        blocks: List<String>,
+        writeTrailers: Boolean = false,
+        writeSectorZero: Boolean = true
+    ): DumpWriteResult {
+        val mfc = MifareClassic.get(tag)
+            ?: return DumpWriteResult(0, 0, 0, "Carte cible non Mifare Classic (ou puce non compatible).")
+        var written = 0
+        var failed = 0
+        var skipped = 0
+        val notes = StringBuilder()
+        try {
+            mfc.connect()
+            for (sector in 0 until mfc.sectorCount) {
+                val firstBlock = mfc.sectorToBlock(sector)
+                val count = mfc.getBlockCountInSector(sector)
+                val srcTrailer = blocks.getOrNull(firstBlock + count - 1)
+                var authed = false
+                for (key in keyCandidates(srcTrailer)) {
+                    val kb = hexToBytes(key) ?: continue
+                    try {
+                        if (mfc.authenticateSectorWithKeyA(sector, kb) ||
+                            mfc.authenticateSectorWithKeyB(sector, kb)) { authed = true; break }
+                    } catch (_: Exception) {
+                        try { mfc.close(); mfc.connect() } catch (_: Exception) {}
+                    }
+                }
+                if (!authed) { failed += count; notes.append("Secteur $sector : authentification échouée\n"); continue }
+
+                for (i in 0 until count) {
+                    val global = firstBlock + i
+                    val raw = blocks.getOrNull(global)?.replace(" ", "")
+                    if (raw == null || raw == NO_DATA || raw.length != 32) { skipped++; continue }
+                    val isTrailer = i == count - 1
+                    val isBlock0 = global == 0
+                    if (isBlock0 && !writeSectorZero) { skipped++; continue }
+                    if (isTrailer && !writeTrailers) { skipped++; continue }
+                    val bytes = hexToBytes(raw)
+                    if (bytes == null || bytes.size != 16) { skipped++; continue }
+                    try {
+                        mfc.writeBlock(global, bytes); written++
+                    } catch (e: Exception) {
+                        failed++
+                        if (isBlock0) notes.append("Bloc 0 (UID) non inscriptible — carte non magic\n")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            notes.append("Erreur : ${e.message}\n")
+        } finally {
+            try { mfc.close() } catch (_: Exception) {}
+        }
+        val msg = "écrits : $written, échecs : $failed, ignorés : $skipped" +
+            (if (notes.isNotEmpty()) "\n$notes" else "")
+        return DumpWriteResult(written, failed, skipped, msg.trim())
+    }
+
+    /** Clés à essayer pour authentifier la cible : défaut, clés du trailer source, dictionnaire. */
+    private fun keyCandidates(srcTrailer: String?): List<String> {
+        val list = mutableListOf(DEFAULT_KEY)
+        if (srcTrailer != null && srcTrailer != NO_DATA) {
+            val clean = srcTrailer.replace(" ", "")
+            if (clean.length == 32) {
+                list.add(clean.substring(0, 12))   // Key A
+                list.add(clean.substring(20, 32))  // Key B
+            }
+        }
+        list.addAll(COMMON_KEYS)
+        return list.distinct()
+    }
 } 

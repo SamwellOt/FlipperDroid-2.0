@@ -30,6 +30,7 @@ fun NfcScreen(
     val ndefContent by nfcViewModel.ndefContent.collectAsState()
     val foundKeys by nfcViewModel.foundKeys.collectAsState()
     val isAttacking by nfcViewModel.isAttacking.collectAsState()
+    val cloneArmed by nfcViewModel.cloneArmed.collectAsState()
     var showHistory by remember { mutableStateOf(false) }
     var showLogs by remember { mutableStateOf(false) }
     var cloneUid by remember { mutableStateOf("") }
@@ -87,6 +88,33 @@ fun NfcScreen(
                                 Text("Save .nfc")
                             }
                         }
+                        // Reproduction : réécrit le dump complet sur une carte cible.
+                        Spacer(Modifier.height(8.dp))
+                        if (cloneArmed) {
+                            Text(
+                                "Clone armed — tap the TARGET (magic/blank) card now…",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            OutlinedButton(
+                                onClick = { nfcViewModel.cancelClone() },
+                                modifier = Modifier.padding(top = 4.dp)
+                            ) { Text("Cancel clone") }
+                        } else {
+                            Button(onClick = { nfcViewModel.armClone() }) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null)
+                                Spacer(Modifier.width(4.dp))
+                                Text("Clone dump to another card")
+                            }
+                        }
+                        Text(
+                            "Reproduction works only on writable Mifare Classic (magic/blank) cards. " +
+                                "Android cannot emulate Mifare Classic (HCE is ISO-DEP only); EMV/bank cards can't be cloned.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
                     }
                     // Attaque par dictionnaire de clés Mifare
                     Spacer(Modifier.height(8.dp))
