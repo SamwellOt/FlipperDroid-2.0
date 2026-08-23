@@ -5,7 +5,6 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -89,7 +88,8 @@ class NetcatViewModel(app: Application) : AndroidViewModel(app) {
         try {
             val input = s.getInputStream()
             val buf = ByteArray(2048)
-            while (isActive) {
+            // disconnect() ferme le socket -> input.read lève une exception -> on sort.
+            while (!s.isClosed) {
                 val n = input.read(buf)
                 if (n < 0) break
                 appendLog("< " + String(buf, 0, n, Charsets.UTF_8).trimEnd('\n', '\r'))
