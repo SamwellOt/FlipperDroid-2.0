@@ -251,6 +251,45 @@ fun NetworkToolsScreen(
                     }
                 }
 
+                item {
+                    ElevatedCard(
+                        onClick = { viewModel.pingSweep(ipAddress) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        ListItem(
+                            headlineContent = { Text("Ping Sweep") },
+                            supportingContent = { Text("Find live hosts on the /24 of the IP above") },
+                            leadingContent = { Icon(Icons.Default.Lan, contentDescription = null) }
+                        )
+                    }
+                }
+
+                item {
+                    ElevatedCard(
+                        onClick = { viewModel.arpTable() },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        ListItem(
+                            headlineContent = { Text("ARP Table") },
+                            supportingContent = { Text("Local network neighbors (IP -> MAC)") },
+                            leadingContent = { Icon(Icons.Default.DeviceHub, contentDescription = null) }
+                        )
+                    }
+                }
+
+                item {
+                    ElevatedCard(
+                        onClick = { viewModel.wakeOnLan(ipAddress) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        ListItem(
+                            headlineContent = { Text("Wake-on-LAN") },
+                            supportingContent = { Text("Send magic packet (put a MAC in the field above)") },
+                            leadingContent = { Icon(Icons.Default.PowerSettingsNew, contentDescription = null) }
+                        )
+                    }
+                }
+
                 /**
                  * Affichage des resultats avec coloration des erreurs
                  */

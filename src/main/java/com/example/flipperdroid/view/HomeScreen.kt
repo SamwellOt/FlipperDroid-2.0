@@ -84,12 +84,27 @@ fun HomeScreen(
     }
     val features = listOf(
         FeatureItem("NFC Reader", Icons.Default.Nfc, "nfc"),
+        FeatureItem("EMV Reader", Icons.Default.CreditCard, "emv_reader"),
+        FeatureItem("EMV Emulation", Icons.Default.Contactless, "emv_emulation"),
         FeatureItem("BadUSB", Icons.Default.Usb, "badusb"),
-        FeatureItem("Bluetooth", Icons.Default.Bluetooth, "bluetooth"),
+        FeatureItem("BadUSB (root)", Icons.Default.Keyboard, "badusb_root"),
+        FeatureItem("BLE Spam", Icons.Default.Bluetooth, "bluetooth"),
+        FeatureItem("BLE Scanner", Icons.Default.BluetoothSearching, "ble_scanner"),
+        FeatureItem("BLE Beacon", Icons.Default.BluetoothAudio, "ble_beacon"),
+        FeatureItem("BLE Keyboard", Icons.Default.KeyboardAlt, "ble_keyboard"),
         FeatureItem("Network Tools", Icons.Default.Router, "network"),
         FeatureItem("Wifi Deauther", Icons.Default.WifiOff, "wifi_deauther"),
+        FeatureItem("WiFi Analyzer", Icons.Default.NetworkWifi, "wifi_analyzer"),
+        FeatureItem("Evil Portal", Icons.Default.Router, "evil_portal"),
+        FeatureItem("Wardriving", Icons.Default.Map, "wardriving"),
+        FeatureItem("Skimmer Detector", Icons.Default.CreditCardOff, "skimmer"),
         FeatureItem("Infrared", Icons.Default.SettingsRemote, "ir"),
+        FeatureItem("IR Remotes", Icons.Default.Tv, "ir_remotes"),
+        FeatureItem("QR Scanner", Icons.Default.QrCodeScanner, "qr"),
         FeatureItem("Password Generator", Icons.Default.Key, "password_generator"),
+        FeatureItem("2FA Vault", Icons.Default.Pin, "totp"),
+        FeatureItem("Flipper Files", Icons.Default.Folder, "flipper_files"),
+        FeatureItem("Logs", Icons.Default.Article, "logs"),
         FeatureItem("Settings", Icons.Default.Settings, "settings"),
         FeatureItem("About", Icons.Default.Info, "about")
     )

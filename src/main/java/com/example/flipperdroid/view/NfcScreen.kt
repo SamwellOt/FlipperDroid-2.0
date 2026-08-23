@@ -1,6 +1,8 @@
 package com.example.flipperdroid.view
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -25,9 +27,13 @@ fun NfcScreen(
     val currentTagDump by nfcViewModel.currentTagDump.collectAsState()
     val scanHistory by nfcViewModel.scanHistory.collectAsState()
     val logs by nfcViewModel.logs.collectAsState()
+    val ndefContent by nfcViewModel.ndefContent.collectAsState()
+    val foundKeys by nfcViewModel.foundKeys.collectAsState()
+    val isAttacking by nfcViewModel.isAttacking.collectAsState()
     var showHistory by remember { mutableStateOf(false) }
     var showLogs by remember { mutableStateOf(false) }
     var cloneUid by remember { mutableStateOf("") }
+    var ndefWrite by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -54,6 +60,7 @@ fun NfcScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
                 .padding(16.dp)
+                .verticalScroll(rememberScrollState())
         ) {
             // Section Lecture
             Card(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
@@ -70,11 +77,60 @@ fun NfcScreen(
                                 Text(currentTagDump[i], fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                             }
                         }
-                        Button(onClick = { nfcViewModel.onDumpExport() }, Modifier.padding(top = 8.dp)) {
-                            Icon(Icons.Default.Save, contentDescription = "Export")
-                            Spacer(Modifier.width(4.dp))
-                            Text("Export dump")
+                        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { nfcViewModel.onDumpExport() }) {
+                                Icon(Icons.Default.Save, contentDescription = "Export")
+                                Spacer(Modifier.width(4.dp))
+                                Text("Export")
+                            }
+                            OutlinedButton(onClick = { nfcViewModel.saveAsNfc() }) {
+                                Text("Save .nfc")
+                            }
                         }
+                    }
+                    // Attaque par dictionnaire de clés Mifare
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = { nfcViewModel.runDictionaryAttack() },
+                        enabled = !isAttacking
+                    ) {
+                        Text(if (isAttacking) "Attacking..." else "Dictionary attack (Mifare keys)")
+                    }
+                    if (foundKeys.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("Keys found:", fontWeight = FontWeight.Bold)
+                        LazyColumn(Modifier.heightIn(max = 150.dp)) {
+                            items(foundKeys.size) { i ->
+                                Text(foundKeys[i], fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = MaterialTheme.typography.bodySmall.fontSize)
+                            }
+                        }
+                    }
+                }
+            }
+            // Section NDEF (lecture)
+            if (ndefContent != null) {
+                Card(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("NDEF Content", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(8.dp))
+                        Text(ndefContent ?: "")
+                    }
+                }
+            }
+            // Section NDEF (écriture)
+            Card(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("NDEF Write", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = ndefWrite,
+                        onValueChange = { ndefWrite = it },
+                        label = { Text("Text or URL to write") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Button(onClick = { nfcViewModel.writeNdef(ndefWrite) }, Modifier.padding(top = 8.dp)) {
+                        Text("Write NDEF to tag")
                     }
                 }
             }

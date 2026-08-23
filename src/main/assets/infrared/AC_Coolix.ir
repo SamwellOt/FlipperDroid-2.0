@@ -1,0 +1,35 @@
+Filetype: IR signals file
+Version: 1
+# Generic A/C (Coolix 24-bit protocol) - common on cheap split ACs.
+# AC frames are stateful/vendor-specific; import your unit's .ir if these don't work.
+# command is the 24-bit Coolix value in little-endian bytes.
+#
+name: Power_off
+type: parsed
+protocol: Coolix
+address: 00 00 00 00
+command: E0 7B B2 00
+#
+name: Power_on
+type: parsed
+protocol: Coolix
+address: 00 00 00 00
+command: C0 BF B2 00
+#
+name: Swing
+type: parsed
+protocol: Coolix
+address: 00 00 00 00
+command: E0 6B B2 00
+#
+name: Turbo
+type: parsed
+protocol: Coolix
+address: 00 00 00 00
+command: A5 F5 B5 00
+#
+name: Led
+type: parsed
+protocol: Coolix
+address: 00 00 00 00
+command: A5 F5 B5 00

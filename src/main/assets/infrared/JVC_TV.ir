@@ -1,0 +1,39 @@
+Filetype: IR signals file
+Version: 1
+# JVC TV (JVC protocol) - representative codes; import exact model from Flipper-IRDB if needed
+#
+name: Power
+type: parsed
+protocol: JVC
+address: 03 00 00 00
+command: 17 00 00 00
+#
+name: Vol_up
+type: parsed
+protocol: JVC
+address: 03 00 00 00
+command: 03 00 00 00
+#
+name: Vol_dn
+type: parsed
+protocol: JVC
+address: 03 00 00 00
+command: 04 00 00 00
+#
+name: Ch_next
+type: parsed
+protocol: JVC
+address: 03 00 00 00
+command: 07 00 00 00
+#
+name: Ch_prev
+type: parsed
+protocol: JVC
+address: 03 00 00 00
+command: 08 00 00 00
+#
+name: Mute
+type: parsed
+protocol: JVC
+address: 03 00 00 00
+command: 13 00 00 00

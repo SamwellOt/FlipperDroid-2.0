@@ -1,0 +1,45 @@
+Filetype: IR signals file
+Version: 1
+# Roku (NECext, device 234.194 -> address 0xC2EA). Streaming remotes have no power key.
+#
+name: Home
+type: parsed
+protocol: NECext
+address: EA C2 00 00
+command: BB 00 00 00
+#
+name: Back
+type: parsed
+protocol: NECext
+address: EA C2 00 00
+command: C6 00 00 00
+#
+name: Up
+type: parsed
+protocol: NECext
+address: EA C2 00 00
+command: F9 00 00 00
+#
+name: Down
+type: parsed
+protocol: NECext
+address: EA C2 00 00
+command: 9B 00 00 00
+#
+name: Left
+type: parsed
+protocol: NECext
+address: EA C2 00 00
+command: F6 00 00 00
+#
+name: Right
+type: parsed
+protocol: NECext
+address: EA C2 00 00
+command: 58 00 00 00
+#
+name: Select
+type: parsed
+protocol: NECext
+address: EA C2 00 00
+command: 57 00 00 00

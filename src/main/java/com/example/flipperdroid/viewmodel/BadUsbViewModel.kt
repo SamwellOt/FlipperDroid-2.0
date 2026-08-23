@@ -7,9 +7,12 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 
 /**
@@ -143,7 +146,9 @@ class BadUsbViewModel : ViewModel() {
      * Met a jour le status avec le resultat de l execution
      */
     fun executeScript() {
-        viewModelScope.launch {
+        // Les transferts USB sont bloquants : on exécute sur un thread d'IO
+        // et on utilise delay() (non bloquant) au lieu de Thread.sleep().
+        viewModelScope.launch(Dispatchers.IO) {
             if (!_isConnected.value) {
                 _status.value = "Not connected as USB keyboard"
                 return@launch
@@ -155,8 +160,8 @@ class BadUsbViewModel : ViewModel() {
 
                 script.forEach { char ->
                     sendKey(char)
-                    // Add small delay between keystrokes
-                    Thread.sleep(50)
+                    // Petit délai entre chaque frappe
+                    delay(50)
                 }
 
                 _status.value = "Script executed successfully"
@@ -176,12 +181,34 @@ class BadUsbViewModel : ViewModel() {
      */
     private fun sendKey(char: Char) {
         val (modifier, keycode) = when (char) {
-            in 'A'..'Z' -> Pair(modfiferLeftShift, char.toLowerCase().toKeycode())
+            in 'A'..'Z' -> Pair(modfiferLeftShift, char.lowercaseChar().toKeycode())
             in 'a'..'z' -> Pair(modifierNone, char.toKeycode())
             in '0'..'9' -> Pair(modifierNone, char.toKeycode())
             ' ' -> Pair(modifierNone, 0x2C) // Spacebar
+            '\n' -> Pair(modifierNone, 0x28) // Enter
+            '\t' -> Pair(modifierNone, 0x2B) // Tab
             '.' -> Pair(modifierNone, 0x37)
             ',' -> Pair(modifierNone, 0x36)
+            '-' -> Pair(modifierNone, 0x2D)
+            '_' -> Pair(modfiferLeftShift, 0x2D)
+            '=' -> Pair(modifierNone, 0x2E)
+            '+' -> Pair(modfiferLeftShift, 0x2E)
+            ';' -> Pair(modifierNone, 0x33)
+            ':' -> Pair(modfiferLeftShift, 0x33)
+            '\'' -> Pair(modifierNone, 0x34)
+            '"' -> Pair(modfiferLeftShift, 0x34)
+            '/' -> Pair(modifierNone, 0x38)
+            '?' -> Pair(modfiferLeftShift, 0x38)
+            '!' -> Pair(modfiferLeftShift, 0x1E)
+            '@' -> Pair(modfiferLeftShift, 0x1F)
+            '#' -> Pair(modfiferLeftShift, 0x20)
+            '$' -> Pair(modfiferLeftShift, 0x21)
+            '%' -> Pair(modfiferLeftShift, 0x22)
+            '^' -> Pair(modfiferLeftShift, 0x23)
+            '&' -> Pair(modfiferLeftShift, 0x24)
+            '*' -> Pair(modfiferLeftShift, 0x25)
+            '(' -> Pair(modfiferLeftShift, 0x26)
+            ')' -> Pair(modfiferLeftShift, 0x27)
             else -> Pair(modifierNone, 0x00)
         }
 

@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:description="@string/emv_card_service_desc">
-    <aid-group android:category="payment" android:description="@string/emv_card_service_desc">
-        <aid-filter android:name="A0000000031010" /> <!-- Visa -->
-    </aid-group>
-</host-apdu-service> 

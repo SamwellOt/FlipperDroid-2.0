@@ -18,7 +18,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import kotlin.random.Random
+import java.security.SecureRandom
 import android.graphics.Bitmap
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
@@ -46,7 +46,9 @@ fun PasswordGeneratorScreen(navController: NavController) {
         if (useDigits) chars += digits
         if (useSymbols) chars += symbols
         if (chars.isEmpty()) return ""
-        return (1..length).map { chars[Random.nextInt(chars.length)] }.joinToString("")
+        // SecureRandom : générateur cryptographiquement sûr (indispensable pour des mots de passe)
+        val rng = SecureRandom()
+        return (1..length).map { chars[rng.nextInt(chars.length)] }.joinToString("")
     }
 
     Scaffold(
@@ -76,7 +78,7 @@ fun PasswordGeneratorScreen(navController: NavController) {
                     value = length.toFloat(),
                     onValueChange = { length = it.toInt() },
                     valueRange = 8f..64f,
-                    steps = 56,
+                    steps = 55,
                     modifier = Modifier.weight(2f)
                 )
             }

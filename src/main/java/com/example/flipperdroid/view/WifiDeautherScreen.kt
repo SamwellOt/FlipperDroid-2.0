@@ -46,6 +46,49 @@ fun WifiDeautherScreen(
     val networks by viewModel.networks.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
     val permissionsGranted by viewModel.permissionsGranted.collectAsState()
+    val selectedNetwork by viewModel.selectedNetwork.collectAsState()
+    val isDeauthing by viewModel.isDeauthing.collectAsState()
+    val deauthStatus by viewModel.deauthStatus.collectAsState()
+
+    // Boîte de dialogue de l'attaque sur le réseau sélectionné
+    selectedNetwork?.let { target ->
+        AlertDialog(
+            onDismissRequest = { if (!isDeauthing) viewModel.clearSelection() },
+            title = { Text("Target: ${target.ssid}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("BSSID: ${target.bssid}")
+                    Text("Channel: ${target.channel}  •  ${target.frequency} MHz")
+                    Text("Signal: ${target.rssi} dBm")
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "⚠ Deauthentication requires root and a Wi-Fi chipset with monitor mode + " +
+                            "packet injection. Most phones cannot do this. Only attack networks you own " +
+                            "or are authorized to test.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    if (deauthStatus.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(deauthStatus, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {
+                if (isDeauthing) {
+                    Button(onClick = { viewModel.stopDeauth() }) { Text("Stop") }
+                } else {
+                    Button(onClick = { viewModel.startDeauth(target) }) { Text("Start Deauth") }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.clearSelection() },
+                    enabled = !isDeauthing
+                ) { Text("Close") }
+            }
+        )
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -260,9 +303,10 @@ fun NetworkCard(
 ) {
     val networkStrength = viewModel.getNetworkStrength(network.rssi)
     val securityType = viewModel.getSecurityType(network.capabilities)
-    
+
     Card(
         modifier = Modifier.fillMaxWidth(),
+        onClick = { viewModel.selectNetwork(network) },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )

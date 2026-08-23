@@ -151,7 +151,14 @@ class MainActivity : ComponentActivity() {
             intent?.action == NfcAdapter.ACTION_NDEF_DISCOVERED
         ) {
             val tag: Tag? = intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java)
-            tag?.let { nfcViewModel.onTagScanned(it) }
+            tag?.let {
+                // Un tag Mifare Classic sera lu par nfcViewModel ; une carte EMV (IsoDep)
+                // sera lue par emvReaderViewModel. Chaque ViewModel ignore proprement
+                // les tags qui ne correspondent pas à sa technologie, donc un seul
+                // des deux se connecte réellement à la carte présentée.
+                nfcViewModel.onTagScanned(it)
+                emvReaderViewModel.readCard(it)
+            }
         }
     }
 
@@ -223,8 +230,47 @@ class MainActivity : ComponentActivity() {
             composable("ir") {
                 InfraredScreen(navController = navController)
             }
+            composable("ir_remotes") {
+                IrRemoteScreen(navController = navController)
+            }
             composable("password_generator") {
                 PasswordGeneratorScreen(navController = navController)
+            }
+            composable("qr") {
+                QrScannerScreen(navController = navController)
+            }
+            composable("ble_scanner") {
+                BleScannerScreen(navController = navController, viewModel = bluetoothViewModel)
+            }
+            composable("wardriving") {
+                WardrivingScreen(navController = navController)
+            }
+            composable("skimmer") {
+                SkimmerDetectorScreen(navController = navController)
+            }
+            composable("wifi_analyzer") {
+                WifiAnalyzerScreen(navController = navController)
+            }
+            composable("badusb_root") {
+                RootBadUsbScreen(navController = navController)
+            }
+            composable("ble_beacon") {
+                BeaconScreen(navController = navController)
+            }
+            composable("ble_keyboard") {
+                HidKeyboardScreen(navController = navController)
+            }
+            composable("evil_portal") {
+                EvilPortalScreen(navController = navController)
+            }
+            composable("totp") {
+                TotpScreen(navController = navController)
+            }
+            composable("flipper_files") {
+                FlipperFilesScreen(navController = navController)
+            }
+            composable("logs") {
+                LogsScreen(navController = navController)
             }
             composable("settings") {
                 SettingsScreen(navController = navController, themeViewModel = themeViewModel)
@@ -261,10 +307,6 @@ class MainActivity : ComponentActivity() {
                     assetPath = "legacy/legacy_notice.txt",
                     title = "Legacy Notice"
                 )
-
-                composable("password_generator") {
-                    PasswordGeneratorScreen(navController = navController)
-                }
             }
         }
     }

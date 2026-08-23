@@ -549,6 +549,88 @@ class NetworkToolsViewModel : ViewModel() {
 
 
     /**
+     * Wake-on-LAN : envoie un "magic packet" à l'adresse MAC fournie (broadcast UDP 9).
+     */
+    fun wakeOnLan(mac: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isScanning.value = true
+            try {
+                val clean = mac.replace("[:\\-\\s]".toRegex(), "")
+                if (clean.length != 12) throw IllegalArgumentException("MAC invalide")
+                val macBytes = ByteArray(6) { clean.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
+                val packet = ByteArray(6 + 16 * 6)
+                for (i in 0 until 6) packet[i] = 0xFF.toByte()
+                for (i in 0 until 16) System.arraycopy(macBytes, 0, packet, 6 + i * 6, 6)
+                val address = java.net.InetAddress.getByName("255.255.255.255")
+                java.net.DatagramSocket().use { socket ->
+                    socket.broadcast = true
+                    socket.send(java.net.DatagramPacket(packet, packet.size, address, 9))
+                }
+                _results.value = _results.value + NetworkResult("Wake-on-LAN $mac", "Magic packet sent to $mac")
+            } catch (e: Exception) {
+                _results.value = _results.value + NetworkResult("Wake-on-LAN $mac", "Error: ${e.message}", true)
+            } finally {
+                _isScanning.value = false
+            }
+        }
+    }
+
+    /**
+     * Lit la table ARP du noyau (/proc/net/arp) : voisins IP/MAC sur le réseau local.
+     */
+    fun arpTable() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isScanning.value = true
+            try {
+                val output = StringBuilder("Neighbors (IP -> MAC):\n\n")
+                val lines = File("/proc/net/arp").readLines()
+                lines.drop(1).forEach { line ->
+                    val cols = line.trim().split(Regex("\\s+"))
+                    if (cols.size >= 4 && cols[3] != "00:00:00:00:00:00") {
+                        output.append("${cols[0]} -> ${cols[3]}\n")
+                    }
+                }
+                _results.value = _results.value + NetworkResult("ARP table", output.toString())
+            } catch (e: Exception) {
+                _results.value = _results.value + NetworkResult("ARP table", "Error: ${e.message}", true)
+            } finally {
+                _isScanning.value = false
+            }
+        }
+    }
+
+    /**
+     * Balayage de sous-réseau : ping les hôtes 1..254 du /24 dérivé de l'IP fournie.
+     */
+    fun pingSweep(baseIp: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isScanning.value = true
+            try {
+                val prefix = baseIp.substringBeforeLast('.', "")
+                if (prefix.isEmpty() || !baseIp.contains('.')) throw IllegalArgumentException("IP invalide")
+                val alive = java.util.Collections.synchronizedList(mutableListOf<String>())
+                val threads = (1..254).map { host ->
+                    Thread {
+                        val ip = "$prefix.$host"
+                        try {
+                            if (InetAddress.getByName(ip).isReachable(300)) alive.add(ip)
+                        } catch (_: Exception) {}
+                    }.apply { start() }
+                }
+                threads.forEach { it.join(1000) }
+                val sorted = alive.sortedBy { it.substringAfterLast('.').toIntOrNull() ?: 0 }
+                val output = if (sorted.isEmpty()) "No hosts responded in $prefix.0/24"
+                    else "Alive hosts (${sorted.size}):\n" + sorted.joinToString("\n")
+                _results.value = _results.value + NetworkResult("Ping sweep $prefix.0/24", output)
+            } catch (e: Exception) {
+                _results.value = _results.value + NetworkResult("Ping sweep", "Error: ${e.message}", true)
+            } finally {
+                _isScanning.value = false
+            }
+        }
+    }
+
+    /**
      * Vide la liste des résultats precedents
      */
     fun clearResults() {

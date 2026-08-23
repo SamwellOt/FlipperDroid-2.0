@@ -1,0 +1,58 @@
+Filetype: IR signals file
+Version: 1
+# Apple TV / Apple Remote A1156 (custom NEC-based, address 0x77E1, device id 0x70).
+# Apple TV may require IR pairing; Select/Play can send dual codes on some remotes.
+#
+name: Menu
+type: parsed
+protocol: Apple
+address: 00 00 00 00
+command: C0 00 00 00
+#
+name: Up
+type: parsed
+protocol: Apple
+address: 00 00 00 00
+command: 50 00 00 00
+#
+name: Down
+type: parsed
+protocol: Apple
+address: 00 00 00 00
+command: 30 00 00 00
+#
+name: Left
+type: parsed
+protocol: Apple
+address: 00 00 00 00
+command: 90 00 00 00
+#
+name: Right
+type: parsed
+protocol: Apple
+address: 00 00 00 00
+command: 60 00 00 00
+#
+name: Select
+type: parsed
+protocol: Apple
+address: 00 00 00 00
+command: A0 00 00 00
+#
+name: Play_Pause
+type: parsed
+protocol: Apple
+address: 00 00 00 00
+command: 20 00 00 00
+#
+name: Vol_up
+type: parsed
+protocol: Apple
+address: 00 00 00 00
+command: D0 00 00 00
+#
+name: Vol_dn
+type: parsed
+protocol: Apple
+address: 00 00 00 00
+command: B0 00 00 00

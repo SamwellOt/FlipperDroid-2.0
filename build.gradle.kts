@@ -72,4 +72,6 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
     implementation("com.google.zxing:core:3.5.2")
+    // Scanner QR/code-barres avec caméra (fournit ScanContract + CaptureActivity)
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 }

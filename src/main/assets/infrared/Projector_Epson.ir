@@ -1,0 +1,57 @@
+Filetype: IR signals file
+Version: 1
+# Epson projector (NECext, device 131.85 -> address 0x5583). Discrete power codes.
+#
+name: Power_on
+type: parsed
+protocol: NECext
+address: 83 55 00 00
+command: 90 00 00 00
+#
+name: Power_off
+type: parsed
+protocol: NECext
+address: 83 55 00 00
+command: 91 00 00 00
+#
+name: Menu
+type: parsed
+protocol: NECext
+address: 83 55 00 00
+command: 9A 00 00 00
+#
+name: Esc
+type: parsed
+protocol: NECext
+address: 83 55 00 00
+command: 84 00 00 00
+#
+name: Up
+type: parsed
+protocol: NECext
+address: 83 55 00 00
+command: B0 00 00 00
+#
+name: Down
+type: parsed
+protocol: NECext
+address: 83 55 00 00
+command: B2 00 00 00
+#
+name: Left
+type: parsed
+protocol: NECext
+address: 83 55 00 00
+command: B3 00 00 00
+#
+name: Right
+type: parsed
+protocol: NECext
+address: 83 55 00 00
+command: B1 00 00 00
+#
+name: Source
+type: parsed
+protocol: NECext
+address: 83 55 00 00
+command: 85 00 00 00

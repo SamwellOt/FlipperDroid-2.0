@@ -1,0 +1,39 @@
+Filetype: IR signals file
+Version: 1
+# Panasonic TV (Kaseikyo, vendor 0x2002, device 0x80) - documented codes
+#
+name: Power
+type: parsed
+protocol: Kaseikyo
+address: 80 00 00 00
+command: 3D 00 00 00
+#
+name: Vol_up
+type: parsed
+protocol: Kaseikyo
+address: 80 00 00 00
+command: 20 00 00 00
+#
+name: Vol_dn
+type: parsed
+protocol: Kaseikyo
+address: 80 00 00 00
+command: 21 00 00 00
+#
+name: Ch_next
+type: parsed
+protocol: Kaseikyo
+address: 80 00 00 00
+command: 34 00 00 00
+#
+name: Ch_prev
+type: parsed
+protocol: Kaseikyo
+address: 80 00 00 00
+command: 35 00 00 00
+#
+name: Mute
+type: parsed
+protocol: Kaseikyo
+address: 80 00 00 00
+command: 32 00 00 00

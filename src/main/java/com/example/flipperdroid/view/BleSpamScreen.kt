@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
@@ -71,6 +72,14 @@ fun BleSpamScreen(
 
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // Affiche le message d'erreur/permission dans le snackbar quand il change
+    LaunchedEffect(showSnackbar) {
+        showSnackbar?.let {
+            snackbarHostState.showSnackbar(it)
+            showSnackbar = null
+        }
+    }
+
     val backButton: @Composable (() -> Unit) = {
         IconButton(onClick = { navController?.navigateUp() }) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour")
@@ -100,11 +109,18 @@ fun BleSpamScreen(
                 .padding(paddingValues)
                 .padding(16.dp)
         ) {
-            // Switch Apple/Samsung
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            // Switch Apple/Samsung/Microsoft/Google/All (défilable si trop large)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.Center
+            ) {
                 val options = listOf(
                     BleSpamViewModel.BleSpamBrand.APPLE to "Apple",
                     BleSpamViewModel.BleSpamBrand.SAMSUNG to "Samsung",
+                    BleSpamViewModel.BleSpamBrand.MICROSOFT to "MS",
+                    BleSpamViewModel.BleSpamBrand.GOOGLE to "Google",
                     BleSpamViewModel.BleSpamBrand.ALL to "All"
                 )
                 options.forEach { (value, label) ->
@@ -168,6 +184,7 @@ fun BleSpamScreen(
             Spacer(Modifier.height(16.dp))
             Button(
                 onClick = {
+                    viewModel.setCheckedPayloads(checkedStates.toList())
                     viewModel.startSpam()
                 },
                 enabled = !isActive && checkedStates.any { it }
