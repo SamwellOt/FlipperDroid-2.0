@@ -40,15 +40,33 @@ class BeaconViewModel : ViewModel() {
         }
         override fun onStartFailure(errorCode: Int) {
             _isAdvertising.value = false
-            _status.value = "Advertise failed: $errorCode"
+            _status.value = "Advertise failed: ${advErrorName(errorCode)} (code $errorCode)"
         }
+    }
+
+    private fun advErrorName(code: Int): String = when (code) {
+        AdvertiseCallback.ADVERTISE_FAILED_DATA_TOO_LARGE -> "DATA_TOO_LARGE (payload > 31 bytes)"
+        AdvertiseCallback.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> "TOO_MANY_ADVERTISERS (toggle Bluetooth off/on)"
+        AdvertiseCallback.ADVERTISE_FAILED_ALREADY_STARTED -> "ALREADY_STARTED"
+        AdvertiseCallback.ADVERTISE_FAILED_INTERNAL_ERROR -> "INTERNAL_ERROR"
+        AdvertiseCallback.ADVERTISE_FAILED_FEATURE_UNSUPPORTED -> "FEATURE_UNSUPPORTED (chip can't advertise)"
+        else -> "UNKNOWN"
     }
 
     fun initialize(context: Context) {
         this.context = context.applicationContext
-        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        adapter = manager.adapter
+        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        adapter = manager?.adapter
         advertiser = adapter?.bluetoothLeAdvertiser
+        val a = adapter
+        _status.value = when {
+            a == null -> "Bluetooth not available on this device."
+            !a.isEnabled -> "Bluetooth is OFF — enable it to advertise."
+            advertiser == null -> "This device does not support BLE advertising."
+            !a.isMultipleAdvertisementSupported ->
+                "Warning: chip reports no advertising offload — advertising may fail (FEATURE_UNSUPPORTED)."
+            else -> "Ready. Advertising supported."
+        }
     }
 
     private fun settings(): AdvertiseSettings = AdvertiseSettings.Builder()

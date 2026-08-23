@@ -73,9 +73,14 @@ class AdvertisementSetQueueHandler(
                 if (!_isSpamming || advertisementSets.isEmpty()) return
                 val set = advertisementSets[index % advertisementSets.size]
                 try {
-                    _advertisementService.stopAdvertisement()
                     set.build()
-                    _advertisementService.startAdvertisement(set)
+                    // On met à jour les données de l'annonce en cours (pas de ré-enregistrement
+                    // -> pas d'accumulation d'advertisers -> plus de TOO_MANY_ADVERTISERS).
+                    // Au 1er tour (rien en cours) ou en legacy : start classique.
+                    if (!_advertisementService.updateAdvertisement(set)) {
+                        _advertisementService.stopAdvertisement()
+                        _advertisementService.startAdvertisement(set)
+                    }
                     onSpamSent?.invoke(set)
                 } catch (e: Exception) {
                     Log.e(_logTag, "Erreur lors du spam BLE: ${e.message}", e)

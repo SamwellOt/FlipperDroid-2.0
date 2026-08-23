@@ -25,6 +25,9 @@ class ModernAdvertisementService(
     private var _advertisementServiceCallbacks: MutableList<IAdvertisementServiceCallback> = mutableListOf()
     private var _currentAdvertisementSet: AdvertisementSet? = null
     private var _txPowerLevel: TxPowerLevel? = null
+    // Le set d'advertising réellement enregistré (renvoyé par onAdvertisingSetStarted) :
+    // permet de mettre à jour les données sans ré-enregistrer.
+    private var _runningSet: AdvertisingSet? = null
 
     init {
         _bluetoothAdapter = context.bluetoothAdapter()
@@ -46,8 +49,11 @@ class ModernAdvertisementService(
         val extendedSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             _bluetoothAdapter?.isLeExtendedAdvertisingSupported == true
         val params = advertisementSet.advertisingSetParameters
-        if (extendedSupported && !hasScanResponse &&
-            estimateLegacySize(advertisementSet.advertiseData) > 31) {
+        // Advertising ÉTENDU dès qu'il est supporté (et sans scan response) : dépasse la limite
+        // legacy de 31 octets ET permet de garder UN set persistant dont on ne change que les
+        // données (voir updateAdvertisement) — plus de ré-enregistrement, donc plus de
+        // TOO_MANY_ADVERTISERS lors du spam.
+        if (extendedSupported && !hasScanResponse) {
             params.legacyMode = false
             params.connectable = advertisementSet.advertiseSettings.connectable
             params.scanable = false
@@ -58,19 +64,6 @@ class ModernAdvertisementService(
         }
         advertisementSet.advertisingSetCallback = getAdvertisingSetCallback()
         return advertisementSet
-    }
-
-    /** Estime la taille (octets) d'une trame d'advertising legacy, pour décider legacy/étendu. */
-    private fun estimateLegacySize(data: AdvertiseData): Int {
-        var n = 3 // AD "flags" souvent présent
-        if (data.includeDeviceName) n += 12
-        if (data.includeTxPower) n += 3
-        data.manufacturerData.forEach { n += 4 + it.manufacturerSpecificData.size } // len+type+companyId(2)+data
-        data.services.forEach { s ->
-            n += 4 // service UUID 16 bits (len+type+uuid)
-            s.serviceData?.let { n += 4 + it.size }
-        }
-        return n
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
@@ -113,11 +106,27 @@ class ModernAdvertisementService(
             if (_currentAdvertisementSet != null) {
                 _advertiser!!.stopAdvertisingSet(_currentAdvertisementSet!!.advertisingSetCallback)
                 _currentAdvertisementSet = null
+                _runningSet = null
             } else {
                 Log.d(_logTag, "Current Modern Advertising Set is null")
             }
         } else {
             Log.d(_logTag, "Advertiser is null")
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    @RequiresPermission(Manifest.permission.BLUETOOTH_ADVERTISE)
+    override fun updateAdvertisement(advertisementSet: AdvertisementSet): Boolean {
+        val running = _runningSet ?: return false
+        val data = advertisementSet.advertiseData.build() ?: return false
+        return try {
+            running.setAdvertisingData(data)
+            _currentAdvertisementSet?.let { advertisementSet.advertisingSetCallback = it.advertisingSetCallback }
+            true
+        } catch (e: Exception) {
+            Log.d(_logTag, "updateAdvertisement failed: ${e.message}")
+            false
         }
     }
 
@@ -148,6 +157,7 @@ class ModernAdvertisementService(
         return object : AdvertisingSetCallback() {
             override fun onAdvertisingSetStarted(advertisingSet: AdvertisingSet?, txPower: Int, status: Int) {
                 if (status == ADVERTISE_SUCCESS) {
+                    _runningSet = advertisingSet
                     _advertisementServiceCallbacks.map {
                         it.onAdvertisementSetSucceeded(_currentAdvertisementSet)
                     }
@@ -168,6 +178,7 @@ class ModernAdvertisementService(
             override fun onAdvertisingDataSet(advertisingSet: AdvertisingSet, status: Int) {}
             override fun onScanResponseDataSet(advertisingSet: AdvertisingSet, status: Int) {}
             override fun onAdvertisingSetStopped(advertisingSet: AdvertisingSet) {
+                _runningSet = null
                 _advertisementServiceCallbacks.map {
                     it.onAdvertisementSetStop(_currentAdvertisementSet)
                 }

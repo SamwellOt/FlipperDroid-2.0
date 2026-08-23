@@ -40,7 +40,9 @@ class BleSpamViewModel(app: Application) : AndroidViewModel(app) {
     private var spamCount = 0
 
     // Vitesse du spam (intervalle en ms entre deux trames) : plus petit = plus agressif.
-    private val _speedMs = MutableStateFlow(20L)
+    // 100 ms par défaut : setAdvertisingData est débité par le contrôleur ; trop rapide,
+    // certaines mises à jour sont ignorées (sans fuite d'advertisers).
+    private val _speedMs = MutableStateFlow(100L)
     val speedMs: StateFlow<Long> = _speedMs
 
     fun setSpeed(ms: Long) {
@@ -74,7 +76,9 @@ class BleSpamViewModel(app: Application) : AndroidViewModel(app) {
         // par l'advertising legacy) au lieu de laisser croire à un envoi réussi.
         handler.onSpamError = { set, error ->
             val name = set?.title?.takeIf { it.isNotBlank() } ?: set?.type?.toString() ?: "?"
-            _spamLogs.value = (_spamLogs.value + "⚠ FAILED: $name ($error)").takeLast(100)
+            val hint = if (error == com.example.flipperdroid.model.enums.AdvertisementError.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS)
+                " — toggle Bluetooth OFF/ON to clear leaked advertisers" else ""
+            _spamLogs.value = (_spamLogs.value + "⚠ FAILED: $name ($error)$hint").takeLast(100)
         }
         handler.setIntervalMillis(_speedMs.value)
         handler.startSpam(sets)

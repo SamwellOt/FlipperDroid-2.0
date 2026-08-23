@@ -164,11 +164,14 @@ class MainActivity : ComponentActivity() {
             val tag: Tag? = intent.parcelableExtraCompat(NfcAdapter.EXTRA_TAG)
             tag?.let {
                 // Un tag Mifare Classic sera lu par nfcViewModel ; une carte EMV (IsoDep)
-                // sera lue par emvReaderViewModel. Chaque ViewModel ignore proprement
-                // les tags qui ne correspondent pas à sa technologie, donc un seul
-                // des deux se connecte réellement à la carte présentée.
+                // par emvReaderViewModel. MAIS si une capture d'émulation ou un clone est
+                // armé, NfcViewModel se connecte lui-même au tag : le lecteur EMV ne doit
+                // pas ouvrir une 2e connexion IsoDep concurrente (elles se bloqueraient et
+                // la capture échouerait). On lit l'état "armé" AVANT onTagScanned, qui le
+                // remet à false.
+                val nfcBusy = nfcViewModel.emuCaptureArmed.value || nfcViewModel.cloneArmed.value
                 nfcViewModel.onTagScanned(it)
-                emvReaderViewModel.readCard(it)
+                if (!nfcBusy) emvReaderViewModel.readCard(it)
             }
         }
     }
