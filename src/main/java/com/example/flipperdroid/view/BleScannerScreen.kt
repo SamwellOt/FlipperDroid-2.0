@@ -187,7 +187,7 @@ fun BleScannerScreen(
                     item { Text("Scanned devices", style = MaterialTheme.typography.titleMedium) }
                     items(devices) { device ->
                         Card(
-                            Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth(),
                             onClick = { viewModel.connect(device) }
                         ) {
                             Row(

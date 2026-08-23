@@ -8,9 +8,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStream
@@ -101,7 +101,9 @@ class RootBadUsbViewModel : ViewModel() {
         var defaultDelay = 0L
         val lines = script.split("\n")
         for (raw in lines) {
-            if (!isActive || !_isRunning.value) break
+            // executeDucky est une suspend fun sans receiver CoroutineScope : on teste
+            // l'annulation via le Job du contexte plutôt que le bare `isActive`.
+            if (coroutineContext[Job]?.isActive == false || !_isRunning.value) break
             val line = raw.trim()
             if (line.isEmpty()) continue
             val parts = line.split(" ", limit = 2)
