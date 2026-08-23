@@ -13,6 +13,7 @@ import kotlinx.coroutines.withContext
 import com.example.flipperdroid.nfc.ApduCapture
 import com.example.flipperdroid.nfc.EmulationStore
 import com.example.flipperdroid.nfc.MifareClassicUtils
+import com.example.flipperdroid.nfc.MifareUltralightUtils
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -60,6 +61,10 @@ class NfcViewModel(app: Application) : AndroidViewModel(app) {
     private val _emuCaptureArmed = MutableStateFlow(false)
     val emuCaptureArmed: StateFlow<Boolean> = _emuCaptureArmed.asStateFlow()
 
+    // Analyse détaillée du dernier tag (UID/ATQA/SAK/ATS/NDEF/amiibo…).
+    private val _tagInfo = MutableStateFlow<String?>(null)
+    val tagInfo: StateFlow<String?> = _tagInfo.asStateFlow()
+
     // Dernier tag scanné (nécessaire pour l'attaque, le clone, le NDEF)
     private var lastTag: Tag? = null
 
@@ -80,6 +85,7 @@ class NfcViewModel(app: Application) : AndroidViewModel(app) {
         val techs = tag.techList?.map { it.substringAfterLast('.') } ?: emptyList()
         val typeLabel = describeTag(techs)
         _currentTagType.value = typeLabel
+        _tagInfo.value = try { com.example.flipperdroid.nfc.NfcInfo.describe(tag) } catch (e: Exception) { null }
 
         viewModelScope.launch(Dispatchers.IO) {
             // NDEF puis MifareClassic, séquentiellement : deux technologies NFC ne
@@ -114,16 +120,33 @@ class NfcViewModel(app: Application) : AndroidViewModel(app) {
                 } finally {
                     try { mfc.close() } catch (_: Exception) {}
                 }
-            } else if (techs.any { it.equals("MifareClassic", true) }) {
-                // Carte Mifare Classic présente mais la puce NFC de l'appareil ne la gère pas
-                // (fréquent hors puces NXP — ex. certains Pixel).
-                addLog("Mifare Classic détecté, mais non supporté par la puce NFC de cet appareil.")
             } else {
-                addLog("Tag lu (UID=$id) — type : $typeLabel. Lecture Mifare non applicable.")
+                // Pas du Mifare Classic : tente Ultralight / NTAG, puis ISO 15693 (NfcV).
+                val pages = MifareUltralightUtils.readDump(tag)
+                val vblocks = if (pages == null) com.example.flipperdroid.nfc.NfcVUtils.readDump(tag) else null
+                if (pages != null) {
+                    dump.addAll(pages)
+                    addLog("Ultralight/NTAG lu : ${pages.size} pages")
+                } else if (vblocks != null && vblocks.isNotEmpty()) {
+                    dump.addAll(vblocks)
+                    addLog("ISO 15693 (NfcV) lu : ${vblocks.size} blocs")
+                } else if (techs.any { it.equals("MifareClassic", true) }) {
+                    addLog("Mifare Classic détecté, mais non supporté par la puce NFC de cet appareil.")
+                } else {
+                    addLog("Tag lu (UID=$id) — type : $typeLabel. Lecture de mémoire non applicable.")
+                }
             }
 
             // Historique + dump pour TOUT tag scanné, pas seulement Mifare Classic.
             _currentTagDump.value = dump
+            // Amiibo (NTAG215, ~135 pages) : l'ID amiibo (8 octets) est aux pages 21-22.
+            if (dump.size in 130..145) {
+                val amiiboId = ((dump.getOrNull(21) ?: "") + (dump.getOrNull(22) ?: "")).replace(" ", "")
+                if (amiiboId.length == 16 && amiiboId.any { it != '0' } && amiiboId.none { it == '-' }) {
+                    _tagInfo.value = (_tagInfo.value ?: "") + "\nAmiibo ID: $amiiboId"
+                    addLog("Amiibo détecté (ID $amiiboId)")
+                }
+            }
             val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
             _scanHistory.value = _scanHistory.value + NfcScanResult(timestamp, id, typeLabel, dump)
             addLog("Tag scanné UID=$id ($typeLabel)" + if (dump.isNotEmpty()) ", ${dump.size} blocks lus" else "")
@@ -304,8 +327,14 @@ class NfcViewModel(app: Application) : AndroidViewModel(app) {
         if (dump.isNullOrEmpty()) { _cloneArmed.value = false; addLog("Aucun dump à cloner."); return }
         viewModelScope.launch(Dispatchers.IO) {
             addLog("Écriture du dump sur la carte cible…")
-            val res = MifareClassicUtils.writeDump(tag, dump, cloneWriteTrailers, cloneWriteSectorZero)
-            addLog("Reproduction terminée — ${res.message}")
+            val res = when {
+                android.nfc.tech.MifareClassic.get(tag) != null ->
+                    MifareClassicUtils.writeDump(tag, dump, cloneWriteTrailers, cloneWriteSectorZero).message
+                android.nfc.tech.MifareUltralight.get(tag) != null ->
+                    MifareUltralightUtils.writeDump(tag, dump).message
+                else -> "Carte cible non supportée (ni Mifare Classic ni Ultralight/NTAG)."
+            }
+            addLog("Reproduction terminée — $res")
             pendingCloneDump = null
             _cloneArmed.value = false
         }
@@ -407,6 +436,68 @@ class NfcViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.Main) { addLog("Erreur .nfc : ${e.message}") }
             }
         }
+    }
+
+    /** Exporte le dump courant en binaire brut (.bin). */
+    fun exportBin() {
+        val dump = _currentTagDump.value
+        if (dump.isEmpty()) { addLog("Aucun dump à exporter"); return }
+        val uid = _currentTagUid.value?.replace(" ", "") ?: "unknown"
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val bytes = dump.flatMap {
+                    (if (it == MifareClassicUtils.NO_DATA) ByteArray(it.length / 2)
+                    else (MifareClassicUtils.hexToBytes(it.replace(" ", "")) ?: ByteArray(0))).toList()
+                }.toByteArray()
+                val dir = getApplication<Application>().getExternalFilesDir("nfc_dumps") ?: getApplication<Application>().filesDir
+                val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                val file = File(dir, "dump_${uid}_$ts.bin")
+                file.writeBytes(bytes)
+                withContext(Dispatchers.Main) { addLog("Export .bin : ${file.absolutePath}") }
+            } catch (e: Exception) { withContext(Dispatchers.Main) { addLog("Erreur export .bin : ${e.message}") } }
+        }
+    }
+
+    /** Exporte le dump au format texte Mifare Classic Tool (+Sector + blocs). */
+    fun exportMct() {
+        val dump = _currentTagDump.value
+        if (dump.isEmpty()) { addLog("Aucun dump à exporter"); return }
+        val uid = _currentTagUid.value?.replace(" ", "") ?: "unknown"
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val sb = StringBuilder()
+                dump.forEachIndexed { i, b ->
+                    if (i % 4 == 0) sb.append("+Sector: ${i / 4}\n")
+                    sb.append(b.replace(" ", "")).append("\n")
+                }
+                val dir = getApplication<Application>().getExternalFilesDir("nfc_dumps") ?: getApplication<Application>().filesDir
+                val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                val file = File(dir, "dump_${uid}_$ts.mct")
+                file.writeText(sb.toString())
+                withContext(Dispatchers.Main) { addLog("Export MCT : ${file.absolutePath}") }
+            } catch (e: Exception) { withContext(Dispatchers.Main) { addLog("Erreur export MCT : ${e.message}") } }
+        }
+    }
+
+    /** Importe un dump depuis un texte MCT ; le charge pour un clonage ultérieur. */
+    fun importMct(text: String) {
+        val blocks = text.lines().map { it.trim() }.filter { line ->
+            line.length == 32 && (line == MifareClassicUtils.NO_DATA ||
+                line.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' })
+        }
+        if (blocks.isEmpty()) { addLog("Aucun bloc valide (MCT) dans le fichier"); return }
+        _currentTagDump.value = blocks
+        _currentTagUid.value = blocks[0].take(8)
+        addLog("Import MCT : ${blocks.size} blocs. Utilisez 'Clone' pour écrire sur une carte.")
+    }
+
+    /** Importe un dump binaire brut (.bin) découpé en blocs de 16 octets. */
+    fun importBin(bytes: ByteArray) {
+        if (bytes.isEmpty()) { addLog("Fichier vide"); return }
+        val blocks = bytes.toList().chunked(16).map { MifareClassicUtils.bytesToHex(it.toByteArray()) }
+        _currentTagDump.value = blocks
+        _currentTagUid.value = blocks.getOrNull(0)?.take(8)
+        addLog("Import .bin : ${blocks.size} blocs. Utilisez 'Clone' pour écrire sur une carte.")
     }
 
     fun clearLogs() {

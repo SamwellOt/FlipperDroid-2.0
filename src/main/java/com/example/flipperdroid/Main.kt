@@ -250,11 +250,38 @@ class MainActivity : ComponentActivity() {
             composable("password_generator") {
                 PasswordGeneratorScreen(navController = navController)
             }
+            composable("crypto_tools") {
+                CryptoToolsScreen(navController = navController)
+            }
+            composable("wifi_qr") {
+                WifiQrScreen(navController = navController)
+            }
+            composable("default_creds") {
+                DefaultCredsScreen(navController = navController)
+            }
             composable("qr") {
                 QrScannerScreen(navController = navController)
             }
             composable("ble_scanner") {
                 BleScannerScreen(navController = navController, viewModel = bluetoothViewModel)
+            }
+            composable("bt_classic") {
+                BluetoothClassicScreen(navController = navController)
+            }
+            composable("tracker_detector") {
+                TrackerDetectorScreen(navController = navController)
+            }
+            composable("lan_discovery") {
+                LanDiscoveryScreen(navController = navController)
+            }
+            composable("netcat") {
+                NetcatScreen(navController = navController)
+            }
+            composable("gps_spoof") {
+                GpsSpoofScreen(navController = navController)
+            }
+            composable("ndef_emulator") {
+                NdefEmulatorScreen(navController = navController)
             }
             composable("wardriving") {
                 WardrivingScreen(navController = navController)

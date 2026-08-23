@@ -1,5 +1,6 @@
 package com.example.flipperdroid.view
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -68,6 +69,18 @@ fun RootBadUsbScreen(
 
             OutlinedButton(onClick = { viewModel.checkEnvironment() }) {
                 Text("Re-check environment")
+            }
+
+            Text("Load a payload:", style = MaterialTheme.typography.labelLarge)
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                RootBadUsbViewModel.PAYLOADS.forEach { (name, payload) ->
+                    OutlinedButton(onClick = { viewModel.updateScript(payload) }, enabled = !isRunning) {
+                        Text(name, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
 
             OutlinedTextField(

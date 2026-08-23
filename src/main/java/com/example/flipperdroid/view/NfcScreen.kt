@@ -1,9 +1,15 @@
 package com.example.flipperdroid.view
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
@@ -32,6 +38,24 @@ fun NfcScreen(
     val isAttacking by nfcViewModel.isAttacking.collectAsState()
     val cloneArmed by nfcViewModel.cloneArmed.collectAsState()
     val emuCaptureArmed by nfcViewModel.emuCaptureArmed.collectAsState()
+    val tagInfo by nfcViewModel.tagInfo.collectAsState()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val name = uri.lastPathSegment ?: ""
+                val bytes = withContext(Dispatchers.IO) {
+                    try { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } } catch (e: Exception) { null }
+                }
+                if (bytes != null) {
+                    val looksText = name.endsWith(".mct", true) || name.endsWith(".txt", true) ||
+                        bytes.take(16).all { (it.toInt() and 0xFF) in 9..126 }
+                    if (looksText) nfcViewModel.importMct(String(bytes)) else nfcViewModel.importBin(bytes)
+                }
+            }
+        }
+    }
     var showHistory by remember { mutableStateOf(false) }
     var showLogs by remember { mutableStateOf(false) }
     var cloneUid by remember { mutableStateOf("") }
@@ -89,6 +113,10 @@ fun NfcScreen(
                                 Text("Save .nfc")
                             }
                         }
+                        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { nfcViewModel.exportBin() }) { Text("Export .bin") }
+                            OutlinedButton(onClick = { nfcViewModel.exportMct() }) { Text("Export MCT") }
+                        }
                         // Reproduction : réécrit le dump complet sur une carte cible.
                         Spacer(Modifier.height(8.dp))
                         if (cloneArmed) {
@@ -110,8 +138,9 @@ fun NfcScreen(
                             }
                         }
                         Text(
-                            "Reproduction works only on writable Mifare Classic (magic/blank) cards. " +
-                                "Android cannot emulate Mifare Classic (HCE is ISO-DEP only); EMV/bank cards can't be cloned.",
+                            "Reproduction works on writable Mifare Classic (magic) and NTAG/Ultralight cards " +
+                                "(user pages). Android cannot emulate Mifare Classic (HCE is ISO-DEP only); " +
+                                "EMV/bank cards can't be cloned.",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 4.dp)
@@ -125,6 +154,12 @@ fun NfcScreen(
                     ) {
                         Text(if (isAttacking) "Attacking..." else "Dictionary attack (Mifare keys)")
                     }
+                    OutlinedButton(
+                        onClick = { importLauncher.launch(arrayOf("*/*")) },
+                        modifier = Modifier.padding(top = 8.dp)
+                    ) {
+                        Text("Import dump (.bin/.mct)")
+                    }
                     if (foundKeys.isNotEmpty()) {
                         Spacer(Modifier.height(8.dp))
                         Text("Keys found:", fontWeight = FontWeight.Bold)
@@ -133,6 +168,20 @@ fun NfcScreen(
                                 Text(foundKeys[i], fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = MaterialTheme.typography.bodySmall.fontSize)
                             }
                         }
+                    }
+                }
+            }
+            // Section Tag Info (analyse détaillée)
+            if (tagInfo != null) {
+                Card(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Tag Info", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            tagInfo ?: "",
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
                 }
             }

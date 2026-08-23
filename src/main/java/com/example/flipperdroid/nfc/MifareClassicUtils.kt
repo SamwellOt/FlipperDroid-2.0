@@ -93,7 +93,15 @@ object MifareClassicUtils {
             val auth = mfc.authenticateSectorWithKeyA(0, hexToBytes(DEFAULT_KEY) ?: return false)
             if (!auth) return false
             val block0 = mfc.readBlock(0)
-            val newBlock0 = newUid + block0.copyOfRange(newUid.size, block0.size)
+            // Pour un UID 4 octets, le BCC (octet 4) = XOR des 4 octets d'UID : on le recalcule
+            // sinon la carte est mal formée. Le reste (SAK/ATQA/fabricant) est conservé.
+            val newBlock0 = if (newUid.size == 4 && block0.size >= 5) {
+                val bcc = (newUid[0].toInt() xor newUid[1].toInt() xor
+                    newUid[2].toInt() xor newUid[3].toInt()).toByte()
+                newUid + byteArrayOf(bcc) + block0.copyOfRange(5, block0.size)
+            } else {
+                newUid + block0.copyOfRange(newUid.size, block0.size)
+            }
             mfc.writeBlock(0, newBlock0)
             return true
         } catch (e: Exception) {

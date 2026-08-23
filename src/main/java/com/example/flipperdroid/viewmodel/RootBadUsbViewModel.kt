@@ -227,6 +227,54 @@ class RootBadUsbViewModel : ViewModel() {
             STRING Hello from FlipperDroid BadUSB!
         """.trimIndent()
 
+        /** Bibliothèque de payloads DuckyScript prêts à l'emploi (Windows, moteur supporté). */
+        val PAYLOADS: Map<String, String> = linkedMapOf(
+            "Notepad hello (Win)" to """
+                DELAY 800
+                GUI r
+                DELAY 300
+                STRING notepad
+                ENTER
+                DELAY 700
+                STRING Hello from FlipperDroid BadUSB!
+            """.trimIndent(),
+            "Open URL (Win)" to """
+                DELAY 800
+                GUI r
+                DELAY 300
+                STRING https://example.com
+                ENTER
+            """.trimIndent(),
+            "CMD: WiFi profiles (Win)" to """
+                DELAY 800
+                GUI r
+                DELAY 300
+                STRING cmd
+                ENTER
+                DELAY 700
+                STRING netsh wlan show profiles
+                ENTER
+            """.trimIndent(),
+            "PowerShell echo (Win)" to """
+                DELAY 800
+                GUI r
+                DELAY 300
+                STRING powershell
+                ENTER
+                DELAY 900
+                STRING Write-Host "Pwned by FlipperDroid"
+                ENTER
+            """.trimIndent(),
+            "Lock screen (Win)" to "GUI l",
+            "Rickroll (Win)" to """
+                DELAY 800
+                GUI r
+                DELAY 300
+                STRING https://www.youtube.com/watch?v=dQw4w9WgXcQ
+                ENTER
+            """.trimIndent(),
+        )
+
         /** Convertit un caractère en (modificateur, keycode) HID US. */
         fun charToKeycode(c: Char): Pair<Int, Int> = when (c) {
             in 'a'..'z' -> 0 to (c - 'a' + 0x04)
