@@ -6,334 +6,335 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
-import java.io.IOException
 
 /**
- * Lit les cartes bancaires compatibles EMV
+ * Lecteur de cartes bancaires contactless (EMV).
+ *
+ * Suit le vrai flux EMV plutôt que de deviner des SFI :
+ *   1. SELECT PPSE (2PAY.SYS.DDF01) -> découverte des AID (tag 4F)
+ *   2. SELECT AID -> FCI (peut contenir un PDOL, tag 9F38)
+ *   3. GET PROCESSING OPTIONS (GPO) -> AIP + AFL (tag 94, ou template 80/77)
+ *   4. READ RECORD sur chaque enregistrement pointé par l'AFL
+ *   5. Parsing BER-TLV -> PAN (5A), expiration (5F24), porteur (5F20), Track2 (57)
+ * Repli : lecture "brute" des SFI 1..10 si le GPO échoue.
+ *
+ * NB : à usage de test/recherche autorisé uniquement.
  */
 class EmvCardReader {
 
     companion object {
         private const val TAG = "EmvCardReader"
 
-        /**
-         * Liste des AID connus pour les cartes EMV
-         */
-        private val KNOWN_AIDS = arrayOf(
+        /** AID de repli si le PPSE ne renvoie rien d'exploitable. */
+        private val KNOWN_AIDS = listOf(
             "A0000000041010", // Mastercard
             "A0000000031010", // Visa
             "A0000000651010", // JCB
             "A0000000042203", // Maestro
-            "A0000000043060"  // Maestro UK
+            "A0000000043060", // Maestro UK
+            "A000000025010801", // Amex
+            "A0000003330101"  // UnionPay
         )
 
-        /**
-         * Map associant chaque AID à son type de carte
-         */
         private val AID_MAP = mapOf(
             "A0000000041010" to "Mastercard",
             "A0000000031010" to "Visa",
             "A0000000651010" to "JCB",
             "A0000000042203" to "Maestro",
-            "A0000000043060" to "Maestro UK"
+            "A0000000043060" to "Maestro UK",
+            "A000000025010801" to "American Express",
+            "A0000003330101" to "UnionPay"
         )
 
         private const val SELECT_PPSE = "2PAY.SYS.DDF01"
-        private const val CLA_ISO = 0x00.toByte()
-        private const val INS_SELECT = 0xA4.toByte()
-        private const val P1_SELECT = 0x04.toByte()
-        private const val P2_SELECT = 0x00.toByte()
     }
 
     private var isoDep: IsoDep? = null
 
     /**
-     * Lit les données d'une carte EMV à partir d un tag NFC
-     *
-     * @param tag tag NFC a lire
-     * @return les données de la carte ou null si echec
+     * Lit une carte EMV à partir d'un tag NFC.
+     * @return les données extraites, ou null si aucune donnée EMV exploitable.
      */
     suspend fun readCard(tag: Tag): EmvCardData? = withContext(Dispatchers.IO) {
+        val iso = IsoDep.get(tag) ?: return@withContext null
+        isoDep = iso
         try {
-            isoDep = IsoDep.get(tag)
-            isoDep?.let { iso ->
-                if (!iso.isConnected) {
-                    iso.connect()
-                }
-                val ppseResponse = selectPPSE(iso)
-                if (ppseResponse == null) {
-                    Log.e(TAG, "Failed to select PPSE")
-                    return@withContext null
-                }
+            if (!iso.isConnected) iso.connect()
+            iso.timeout = 5000
 
-                for (aid in KNOWN_AIDS) {
-                    try {
-                        val selectResponse = iso.transceive(buildSelectCommand(aid.hexToByteArray()))
-                        if (isSuccessful(selectResponse)) {
-                            val cardData = readCardData(iso, aid)
-                            if (cardData != null) {
-                                return@withContext cardData
-                            }
-                        }
-                    } catch (e: IOException) {
-                        Log.e(TAG, "Error selecting AID: $aid", e)
-                        continue
-                    }
+            // 1) PPSE -> AID candidats (ordre : ceux de la carte d'abord)
+            val aids = LinkedHashSet<String>()
+            val ppse = selectPpse(iso)
+            if (ppse != null && isSuccessful(ppse)) {
+                tlvFindAll(ppse, 0x4F).forEach { aids.add(bytesToHexString(it)) }
+            }
+            KNOWN_AIDS.forEach { aids.add(it) }
+
+            for (aidHex in aids) {
+                val card = try { tryAid(iso, aidHex) } catch (e: Exception) {
+                    Log.e(TAG, "AID $aidHex failed", e); null
                 }
+                if (card != null && card.isValid()) return@withContext card
             }
-        } catch (e: IOException) {
+            null
+        } catch (e: Exception) {
             Log.e(TAG, "Error reading EMV card", e)
+            null
         } finally {
-            try {
-                isoDep?.close()
-            } catch (e: IOException) {
-                Log.e(TAG, "Error closing IsoDep", e)
-            }
+            try { iso.close() } catch (_: Exception) {}
         }
-        null
     }
 
-    /**
-     * Lit les donnéesd'une carte a partir de son AID
-     *
-     * @param iso canal de communication IsoDep ouvert
-     * @param aid identifiant d application de la carte
-     * @return données de carte ou null
-     */
-    private fun readCardData(iso: IsoDep, aid: String): EmvCardData? {
-        val cardData = EmvCardData()
-        cardData.cardType = AID_MAP[aid] ?: "Unknown"
+    /** Sélectionne un AID, tente le GPO puis lit les enregistrements et parse les données. */
+    private fun tryAid(iso: IsoDep, aidHex: String): EmvCardData? {
+        val selResp = transceive(iso, buildSelectCommand(aidHex.hexToByteArray())) ?: return null
+        if (!isSuccessful(selResp)) return null
 
-        // Sélection de l'application EMV
-        // Lecture du premier enregistrement (SFI 1, Record 1 à 10)
-        for (record in 1..10) {
-            val data = readRecord(iso, 1, record)
-            if (data != null) {
-                parseRecordData(data, cardData)
-                if (cardData.isComplete()) break
+        val cardData = EmvCardData()
+        cardData.cardType = AID_MAP[aidHex] ?: brandFromAid(aidHex)
+
+        val pool = ByteArrayOutputStream()
+        fun collect(resp: ByteArray) { if (resp.size >= 2) pool.write(resp, 0, resp.size - 2) }
+
+        // GPO (avec le PDOL demandé par la carte, rempli de valeurs par défaut)
+        val pdol = tlvFindFirst(selResp, 0x9F38)
+        val gpoResp = gpo(iso, pdol)
+        var readAny = false
+        if (gpoResp != null && isSuccessful(gpoResp)) {
+            collect(gpoResp)
+            val afl = tlvFindFirst(gpoResp, 0x94) ?: run {
+                // Format 1 : template 80 = AIP(2 octets) + AFL
+                val fmt1 = tlvFindFirst(gpoResp, 0x80)
+                if (fmt1 != null && fmt1.size > 2) fmt1.copyOfRange(2, fmt1.size) else null
+            }
+            if (afl != null) {
+                var i = 0
+                while (i + 3 < afl.size) {
+                    val sfi = (afl[i].toInt() and 0xFF) shr 3
+                    val first = afl[i + 1].toInt() and 0xFF
+                    val last = afl[i + 2].toInt() and 0xFF
+                    if (sfi in 1..30 && first in 1..255 && last in first..255) {
+                        for (rec in first..last) {
+                            val r = readRecord(iso, sfi, rec)
+                            if (r != null && isSuccessful(r)) { collect(r); readAny = true }
+                        }
+                    }
+                    i += 4
+                }
             }
         }
-        // Lecture du Track2 (SFI 2, Record 1 à 10)
-        for (record in 1..10) {
-            val data = readRecord(iso, 2, record)
-            if (data != null) {
-                parseTrack2Data(data, cardData)
-                if (cardData.isComplete()) break
+
+        // Repli : lecture brute des SFI/enregistrements courants
+        if (!readAny) {
+            for (sfi in 1..10) {
+                for (rec in 1..10) {
+                    val r = readRecord(iso, sfi, rec)
+                    if (r != null && isSuccessful(r)) collect(r)
+                }
             }
         }
+
+        parseEmv(pool.toByteArray(), cardData)
         return if (cardData.isValid()) cardData else null
     }
 
-    /**
-     * Envoie une commande SELECT PPSE a la carte
-     *
-     * @param iso canal IsoDep
-     * @return reponse brute ou null si erreur
-     */
-    private fun selectPPSE(iso: IsoDep): ByteArray? {
-        val command = buildSelectCommand(SELECT_PPSE.toByteArray())
-        return try {
-            iso.transceive(command)
-        } catch (e: IOException) {
-            Log.e(TAG, "Error selecting PPSE", e)
-            null
-        }
-    }
+    private fun selectPpse(iso: IsoDep): ByteArray? =
+        transceive(iso, buildSelectCommand(SELECT_PPSE.toByteArray()))
 
-    /**
-     * Lit un enregistrement specifique de la carte
-     *
-     * @param iso canal IsoDep
-     * @param sfi identifiant du fichier
-     * @param record numero de l enregistrement
-     * @return tableau de données ou null
-     */
-    private fun readRecord(iso: IsoDep, sfi: Int, record: Int): ByteArray? {
-        val command = ByteArray(5)
-        command[0] = CLA_ISO
-        command[1] = 0xB2.toByte()
-        command[2] = record.toByte()
-        command[3] = (sfi shl 3 or 4).toByte()
-        command[4] = 0x00
-
-        return try {
-            val response = iso.transceive(command)
-            if (isSuccessful(response)) response else null
-        } catch (e: IOException) {
-            null
-        }
-    }
-
-    /**
-     * Analyse les données recues d'un enregistrement EMV pour extraire PAN et date
-     *
-     * @param data tableau binaire des données
-     * @param cardData objet contenant les champs extraits
-     */
-    private fun parseRecordData(data: ByteArray, cardData: EmvCardData) {
-        // Recherche des tags 0x5A (PAN), 0x5F24 (date d'expiration) et 0x5F20 (porteur).
-        // NB : la longueur TLV doit être lue en non signé (and 0xFF) et bornée, sinon
-        // une donnée tronquée/malformée ferait planter copyOfRange.
-        var i = 0
-        while (i < data.size) {
-            val tag = data[i].toInt() and 0xFF
-            when {
-                tag == 0x5A -> { // PAN
-                    val len = data.getOrNull(i + 1)?.toInt()?.and(0xFF) ?: break
-                    val end = i + 2 + len
-                    if (len <= 0 || end > data.size) { i++; continue }
-                    cardData.pan = formatPan(bytesToHexString(data.copyOfRange(i + 2, end)))
-                    i = end
-                }
-                tag == 0x5F -> {
-                    val subTag = data.getOrNull(i + 1)?.toInt()?.and(0xFF) ?: break
-                    when (subTag) {
-                        0x24 -> { // Expiry date (5F24)
-                            val len = data.getOrNull(i + 2)?.toInt()?.and(0xFF) ?: break
-                            val end = i + 3 + len
-                            if (len <= 0 || end > data.size) { i++; continue }
-                            cardData.expiryDate = formatExpiryDate(bytesToHexString(data.copyOfRange(i + 3, end)))
-                            i = end
-                        }
-                        0x20 -> { // Cardholder name (5F20)
-                            val len = data.getOrNull(i + 2)?.toInt()?.and(0xFF) ?: break
-                            val end = i + 3 + len
-                            if (len <= 0 || end > data.size) { i++; continue }
-                            cardData.cardholderName = data.copyOfRange(i + 3, end).toString(Charsets.UTF_8).trim()
-                            i = end
-                        }
-                        else -> i++
-                    }
-                }
-                else -> i++
-            }
-        }
-    }
-
-    /**
-     * Extrait les informations du champ Track2 (tag 0x57)
-     *
-     * @param data tableau binaire du champ
-     * @param cardData objet contenant les données extraites
-     */
-    private fun parseTrack2Data(data: ByteArray, cardData: EmvCardData) {
-        // Recherche du tag 0x57 (Track2 Equivalent Data)
-        var i = 0
-        while (i < data.size) {
-            val tag = data[i].toInt() and 0xFF
-            if (tag == 0x57) {
-                val len = data.getOrNull(i + 1)?.toInt()?.and(0xFF) ?: break
-                val end = i + 2 + len
-                if (len <= 0 || end > data.size) break
-                val track2 = data.copyOfRange(i + 2, end)
-                val track2Str = bytesToHexString(track2)
-                // Format Track2 : PAN=valeur, séparateur D, date d'expiration (YYMM)
-                val parts = track2Str.split("D")
-                if (parts.size >= 2) {
-                    cardData.pan = formatPan(parts[0])
-                    if (parts[1].length >= 4) {
-                        val date = parts[1].substring(0, 4)
-                        cardData.expiryDate = formatExpiryDate(date)
-                    }
-                }
-                break
-            } else {
-                i++
-            }
-        }
-    }
-
-    /**
-     * Formate le numero de carte en groupes de 4 chiffres separes par un espace
-     *
-     * @param pan numero de carte brute
-     * @return pan formate
-     */
-    private fun formatPan(pan: String): String {
-        return pan.chunked(4).joinToString(" ")
-    }
-
-    /**
-     * Donne la date d expiration en format MM/YYYY
-     *
-     * @param date date brute
-     * @return date formatee
-     */
-    private fun formatExpiryDate(date: String): String {
-        return try {
-            val month = date.substring(2, 4)
-            val year = date.substring(0, 2)
-            "$month/20$year"
-        } catch (e: Exception) {
-            date
-        }
-    }
-
-    /**
-     * Cree une commande SELECT pour une application EMV
-     *
-     * @param data tableau de données de l AID
-     * @return tableau binaire de la commande
-     */
-    private fun buildSelectCommand(data: ByteArray): ByteArray {
-        return ByteArrayOutputStream().apply {
-            write(CLA_ISO.toInt())
-            write(INS_SELECT.toInt())
-            write(P1_SELECT.toInt())
-            write(P2_SELECT.toInt())
-            write(data.size)
-            write(data)
-            write(0x00)
+    /** GET PROCESSING OPTIONS (CLA 80, INS A8). */
+    private fun gpo(iso: IsoDep, pdol: ByteArray?): ByteArray? {
+        val pdolData = buildPdolData(pdol)
+        val body = ByteArrayOutputStream().apply {
+            write(0x83)              // tag 83 : Command Template
+            write(pdolData.size)
+            write(pdolData)
         }.toByteArray()
+        val apdu = ByteArrayOutputStream().apply {
+            write(0x80); write(0xA8); write(0x00); write(0x00)
+            write(body.size); write(body); write(0x00)
+        }.toByteArray()
+        return transceive(iso, apdu)
     }
 
-    /**
-     * Verifie si la reponse de la carte est un success
-     *
-     * @param response tableau de reponse brute
-     * @return vrai si la reponse contient 0x9000
-     */
-    private fun isSuccessful(response: ByteArray): Boolean {
-        return response.size >= 2 &&
-                response[response.size - 2] == 0x90.toByte() &&
-                response[response.size - 1] == 0x00.toByte()
-    }
-
-    /**
-     * Convertit une chaine hexadecimal en tableau de bytes
-     *
-     * @receiver chaine hexadecimale
-     * @return tableau binaire
-     */
-    private fun String.hexToByteArray(): ByteArray {
-        val len = this.length
-        val data = ByteArray(len / 2)
+    /** Construit les données du PDOL demandé, avec des valeurs par défaut raisonnables. */
+    private fun buildPdolData(pdol: ByteArray?): ByteArray {
+        if (pdol == null || pdol.isEmpty()) return ByteArray(0)
+        val out = ByteArrayOutputStream()
         var i = 0
-        while (i < len) {
-            data[i / 2] = ((Character.digit(this[i], 16) shl 4) +
-                    Character.digit(this[i + 1], 16)).toByte()
+        try {
+            while (i < pdol.size) {
+                var tag = pdol[i].toInt() and 0xFF; i++
+                if ((tag and 0x1F) == 0x1F) {
+                    while (i < pdol.size) {
+                        val b = pdol[i].toInt() and 0xFF; tag = (tag shl 8) or b; i++
+                        if (b and 0x80 == 0) break
+                    }
+                }
+                if (i >= pdol.size) break
+                val len = pdol[i].toInt() and 0xFF; i++
+                out.write(defaultPdolValue(tag, len))
+            }
+        } catch (_: Exception) { /* PDOL malformé : on renvoie ce qu'on a */ }
+        return out.toByteArray()
+    }
+
+    /** Valeur par défaut pour une entrée PDOL (zéros, sauf quelques champs terminal utiles). */
+    private fun defaultPdolValue(tag: Int, len: Int): ByteArray {
+        val v = ByteArray(if (len in 0..255) len else 0)
+        when (tag) {
+            0x9F66 -> if (v.isNotEmpty()) v[0] = 0x36.toByte() // TTQ : mode EMV contactless supporté
+            0x9F35 -> if (v.isNotEmpty()) v[0] = 0x22.toByte() // Terminal Type
+        }
+        return v
+    }
+
+    /** READ RECORD (CLA 00, INS B2), P2 = (SFI << 3) | 4. */
+    private fun readRecord(iso: IsoDep, sfi: Int, record: Int): ByteArray? {
+        val command = byteArrayOf(
+            0x00,
+            0xB2.toByte(),
+            record.toByte(),
+            ((sfi shl 3) or 4).toByte(),
+            0x00
+        )
+        return transceive(iso, command)
+    }
+
+    private fun transceive(iso: IsoDep, apdu: ByteArray): ByteArray? =
+        try { iso.transceive(apdu) } catch (e: Exception) { null }
+
+    /** Construit une commande SELECT (CLA 00, INS A4, P1 04, P2 00). */
+    private fun buildSelectCommand(data: ByteArray): ByteArray =
+        ByteArrayOutputStream().apply {
+            write(0x00); write(0xA4); write(0x04); write(0x00)
+            write(data.size); write(data); write(0x00)
+        }.toByteArray()
+
+    /** Extrait PAN / expiration / porteur des TLV collectés. */
+    private fun parseEmv(data: ByteArray, cardData: EmvCardData) {
+        tlvFindFirst(data, 0x5A)?.let {
+            cardData.pan = formatPan(bytesToHexString(it).trimEnd('F', 'f'))
+        }
+        tlvFindFirst(data, 0x5F24)?.let {
+            cardData.expiryDate = formatExpiryDate(bytesToHexString(it))
+        }
+        tlvFindFirst(data, 0x5F20)?.let {
+            val name = String(it, Charsets.UTF_8).trim()
+            if (name.isNotBlank()) cardData.cardholderName = name
+        }
+        // Track2 (tag 57) : repli pour PAN/expiration
+        if (cardData.pan == null || cardData.expiryDate == null) {
+            tlvFindFirst(data, 0x57)?.let { t2 ->
+                val s = bytesToHexString(t2)
+                val sep = s.indexOfFirst { it == 'D' || it == 'd' }
+                if (sep > 0) {
+                    if (cardData.pan == null) cardData.pan = formatPan(s.substring(0, sep))
+                    if (cardData.expiryDate == null && s.length >= sep + 5) {
+                        cardData.expiryDate = formatExpiryDate(s.substring(sep + 1, sep + 5))
+                    }
+                }
+            }
+        }
+        // Nom applicatif (label) si pas de type déjà défini
+        if (cardData.cardType.isNullOrBlank()) {
+            (tlvFindFirst(data, 0x50) ?: tlvFindFirst(data, 0x9F12))?.let {
+                val label = String(it, Charsets.UTF_8).trim()
+                if (label.isNotBlank()) cardData.cardType = label
+            }
+        }
+    }
+
+    private fun brandFromAid(aidHex: String): String {
+        val a = aidHex.uppercase()
+        return when {
+            a.startsWith("A000000004") -> "Mastercard"
+            a.startsWith("A000000003") -> "Visa"
+            a.startsWith("A000000025") -> "American Express"
+            a.startsWith("A000000065") -> "JCB"
+            a.startsWith("A000000333") -> "UnionPay"
+            else -> "EMV card"
+        }
+    }
+
+    private fun formatPan(pan: String): String = pan.chunked(4).joinToString(" ")
+
+    /** date "YYMM[DD]" -> "MM/20YY". */
+    private fun formatExpiryDate(date: String): String = try {
+        val year = date.substring(0, 2)
+        val month = date.substring(2, 4)
+        "$month/20$year"
+    } catch (e: Exception) { date }
+
+    private fun isSuccessful(response: ByteArray): Boolean =
+        response.size >= 2 &&
+            response[response.size - 2] == 0x90.toByte() &&
+            response[response.size - 1] == 0x00.toByte()
+
+    // --- BER-TLV ---
+
+    /** Renvoie toutes les valeurs (récursivement) pour un tag donné. */
+    private fun tlvFindAll(data: ByteArray, wanted: Int): List<ByteArray> {
+        val out = ArrayList<ByteArray>()
+        try { tlvWalk(data, 0, data.size, wanted, out) } catch (_: Exception) {}
+        return out
+    }
+
+    private fun tlvFindFirst(data: ByteArray, wanted: Int): ByteArray? =
+        tlvFindAll(data, wanted).firstOrNull()
+
+    private fun tlvWalk(data: ByteArray, from: Int, to: Int, wanted: Int, out: MutableList<ByteArray>) {
+        var i = from
+        while (i < to) {
+            val first = data[i].toInt() and 0xFF
+            if (first == 0x00 || first == 0xFF) { i++; continue } // padding
+            var tag = first; i++
+            if ((first and 0x1F) == 0x1F) {
+                while (i < to) {
+                    val b = data[i].toInt() and 0xFF; tag = (tag shl 8) or b; i++
+                    if (b and 0x80 == 0) break
+                }
+            }
+            if (i >= to) break
+            val lenByte = data[i].toInt() and 0xFF; i++
+            val len: Int
+            if (lenByte and 0x80 == 0) {
+                len = lenByte
+            } else {
+                val n = lenByte and 0x7F
+                if (n == 0 || n > 4 || i + n > to) break
+                var acc = 0
+                repeat(n) { acc = (acc shl 8) or (data[i].toInt() and 0xFF); i++ }
+                len = acc
+            }
+            if (len < 0 || i + len > to) break
+            val value = data.copyOfRange(i, i + len)
+            if (tag == wanted) out.add(value)
+            if ((first and 0x20) != 0) tlvWalk(value, 0, value.size, wanted, out) // constructed
+            i += len
+        }
+    }
+
+    private fun String.hexToByteArray(): ByteArray {
+        val clean = this.filter { !it.isWhitespace() }
+        val data = ByteArray(clean.length / 2)
+        var i = 0
+        while (i + 1 < clean.length) {
+            data[i / 2] = ((Character.digit(clean[i], 16) shl 4) +
+                    Character.digit(clean[i + 1], 16)).toByte()
             i += 2
         }
         return data
     }
 
-    /**
-     * Convertit un tableau de bytes en chaine hexadecimale
-     *
-     * @param bytes tableau binaire
-     * @return chaine hexadecimale
-     */
     private fun bytesToHexString(bytes: ByteArray): String {
-        val hex = StringBuilder()
-        for (b in bytes) {
-            hex.append(String.format("%02X", b))
-        }
+        val hex = StringBuilder(bytes.size * 2)
+        for (b in bytes) hex.append(String.format("%02X", b))
         return hex.toString()
     }
 }
 
 /**
- * données extraites d une carte EMV
+ * Données extraites d'une carte EMV.
  */
 data class EmvCardData(
     var pan: String? = null,
@@ -341,29 +342,10 @@ data class EmvCardData(
     var cardholderName: String? = null,
     var cardType: String? = null
 ) {
-    /**
-     * Verifie si le numero et la date sont valides
-     *
-     * @return vrai si pan et date sont presents
-     */
-    fun isValid(): Boolean {
-        return !pan.isNullOrEmpty() && !expiryDate.isNullOrEmpty()
-    }
+    fun isValid(): Boolean = !pan.isNullOrEmpty() && !expiryDate.isNullOrEmpty()
 
-    /**
-     * Verifie si toutes les données de la carte sont presentes
-     *
-     * @return vrai si toutes les données sont remplies
-     */
-    fun isComplete(): Boolean {
-        return isValid() && !cardType.isNullOrEmpty()
-    }
+    fun isComplete(): Boolean = isValid() && !cardType.isNullOrEmpty()
 
-    /**
-     * Retourne les informations de la cartes en texte
-     *
-     * @return chaine formattée des informations de carte
-     */
     override fun toString(): String {
         val sb = StringBuilder()
         cardType?.let { sb.appendLine("Type: $it") }

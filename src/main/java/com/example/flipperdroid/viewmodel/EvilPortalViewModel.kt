@@ -67,7 +67,8 @@ class EvilPortalViewModel : ViewModel() {
                     reservation = res
                     extractCredentials(res)
                     _isRunning.value = true
-                    _status.value = "Hotspot up. Victims connect, then open http://192.168.49.1:8080"
+                    _status.value = "Hotspot up. A connected client must open http://192.168.49.1:8080 " +
+                        "in a browser (no auto captive pop-up without root). Watch Logs for incoming requests."
                     AppLog.log("EvilPortal", "Hotspot started SSID=${_ssid.value}")
                 }
                 override fun onFailed(reason: Int) {
@@ -133,6 +134,8 @@ class EvilPortalViewModel : ViewModel() {
     private fun handleClient(client: Socket) {
         val reader = BufferedReader(InputStreamReader(client.getInputStream()))
         val requestLine = reader.readLine() ?: run { client.close(); return }
+        // Trace chaque requête : permet de vérifier qu'un client atteint bien le portail.
+        AppLog.log("EvilPortal", "Request from ${client.inetAddress?.hostAddress ?: "?"}: $requestLine")
         val method = requestLine.substringBefore(" ")
         var contentLength = 0
         var line: String?

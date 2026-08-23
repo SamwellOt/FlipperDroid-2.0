@@ -60,6 +60,9 @@ class NfcViewModel(app: Application) : AndroidViewModel(app) {
         // Lecture UID (rapide, ne nécessite pas de connexion)
         val id = tag.id?.let { MifareClassicUtils.bytesToHex(it) } ?: "-"
         _currentTagUid.value = id
+        val techs = tag.techList?.map { it.substringAfterLast('.') } ?: emptyList()
+        val typeLabel = describeTag(techs)
+        _currentTagType.value = typeLabel
 
         viewModelScope.launch(Dispatchers.IO) {
             // NDEF puis MifareClassic, séquentiellement : deux technologies NFC ne
@@ -68,46 +71,59 @@ class NfcViewModel(app: Application) : AndroidViewModel(app) {
             readNdef(tag)
 
             val mfc = android.nfc.tech.MifareClassic.get(tag)
-            if (mfc == null) {
-                // Tag non-Mifare (ex: carte EMV IsoDep) : traité par un autre lecteur.
-                addLog("Tag non compatible MifareClassic")
-                return@launch
-            }
-
-            _currentTagType.value = "Mifare Classic"
             val dump = mutableListOf<String>()
-            try {
-                mfc.connect()
-                val sectorCount = mfc.sectorCount
-                for (sector in 0 until sectorCount) {
-                    val key = MifareClassicUtils.hexToBytes(MifareClassicUtils.DEFAULT_KEY) ?: continue
-                    val auth = mfc.authenticateSectorWithKeyA(sector, key)
-                    if (auth) {
-                        val firstBlock = mfc.sectorToBlock(sector)
-                        val blockCount = mfc.getBlockCountInSector(sector)
-                        for (i in 0 until blockCount) {
-                            val blockBytes = try { mfc.readBlock(firstBlock + i) } catch (_: Exception) { null }
-                            dump.add(blockBytes?.let { MifareClassicUtils.bytesToHex(it) } ?: MifareClassicUtils.NO_DATA)
+            if (mfc != null) {
+                try {
+                    mfc.connect()
+                    val sectorCount = mfc.sectorCount
+                    for (sector in 0 until sectorCount) {
+                        val key = MifareClassicUtils.hexToBytes(MifareClassicUtils.DEFAULT_KEY) ?: continue
+                        val auth = mfc.authenticateSectorWithKeyA(sector, key)
+                        if (auth) {
+                            val firstBlock = mfc.sectorToBlock(sector)
+                            val blockCount = mfc.getBlockCountInSector(sector)
+                            for (i in 0 until blockCount) {
+                                val blockBytes = try { mfc.readBlock(firstBlock + i) } catch (_: Exception) { null }
+                                dump.add(blockBytes?.let { MifareClassicUtils.bytesToHex(it) } ?: MifareClassicUtils.NO_DATA)
+                            }
+                        } else {
+                            // Secteur non accessible avec la clé par défaut
+                            val blockCount = mfc.getBlockCountInSector(sector)
+                            repeat(blockCount) { dump.add(MifareClassicUtils.NO_DATA) }
                         }
-                    } else {
-                        // Secteur non accessible avec la clé par défaut
-                        val blockCount = mfc.getBlockCountInSector(sector)
-                        repeat(blockCount) { dump.add(MifareClassicUtils.NO_DATA) }
                     }
+                } catch (e: Exception) {
+                    addLog("Erreur lecture tag: ${e.message}")
+                } finally {
+                    try { mfc.close() } catch (_: Exception) {}
                 }
-            } catch (e: Exception) {
-                addLog("Erreur lecture tag: ${e.message}")
-            } finally {
-                try { mfc.close() } catch (_: Exception) {}
+            } else if (techs.any { it.equals("MifareClassic", true) }) {
+                // Carte Mifare Classic présente mais la puce NFC de l'appareil ne la gère pas
+                // (fréquent hors puces NXP — ex. certains Pixel).
+                addLog("Mifare Classic détecté, mais non supporté par la puce NFC de cet appareil.")
+            } else {
+                addLog("Tag lu (UID=$id) — type : $typeLabel. Lecture Mifare non applicable.")
             }
 
-            // Mise à jour des états et de l'historique (StateFlow est thread-safe)
+            // Historique + dump pour TOUT tag scanné, pas seulement Mifare Classic.
             _currentTagDump.value = dump
             val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-            val scan = NfcScanResult(timestamp, id, "Mifare Classic", dump)
-            _scanHistory.value = _scanHistory.value + scan
-            addLog("Tag scanné UID=$id, ${dump.size} blocks lus")
+            _scanHistory.value = _scanHistory.value + NfcScanResult(timestamp, id, typeLabel, dump)
+            addLog("Tag scanné UID=$id ($typeLabel)" + if (dump.isNotEmpty()) ", ${dump.size} blocks lus" else "")
         }
+    }
+
+    /** Étiquette lisible du type de tag à partir de sa liste de technologies. */
+    private fun describeTag(techs: List<String>): String = when {
+        techs.any { it.equals("MifareClassic", true) } -> "Mifare Classic"
+        techs.any { it.equals("MifareUltralight", true) } -> "Mifare Ultralight"
+        techs.any { it.equals("IsoDep", true) } -> "ISO-DEP (EMV / DESFire)"
+        techs.any { it.equals("NfcA", true) } -> "NFC-A (ISO 14443-3A)"
+        techs.any { it.equals("NfcB", true) } -> "NFC-B (ISO 14443-3B)"
+        techs.any { it.equals("NfcF", true) } -> "NFC-F (FeliCa)"
+        techs.any { it.equals("NfcV", true) } -> "NFC-V (ISO 15693)"
+        techs.isNotEmpty() -> techs.joinToString(", ")
+        else -> "Unknown"
     }
     /**
      * Lit un message NDEF (texte/URI) si le tag le supporte.

@@ -1,7 +1,9 @@
 package com.example.flipperdroid.view
 
 import android.content.Context
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -36,6 +38,7 @@ data class FeatureItem(
     val title: String,
     val icon: ImageVector,
     val route: String,
+    val description: String = "",
     val enabled: Boolean = true
 )
 
@@ -48,7 +51,7 @@ data class FeatureItem(
  * @param navController Controleur de navigation
  * @param nfcViewModel ViewModel NFC injecte mais non utilise ici
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     navController: NavController,
@@ -82,31 +85,67 @@ fun HomeScreen(
             dismissButton = {}
         )
     }
+    // Boîte de dialogue d'aide (affichée sur appui long d'une tuile).
+    var infoFeature by remember { mutableStateOf<FeatureItem?>(null) }
+    infoFeature?.let { f ->
+        AlertDialog(
+            onDismissRequest = { infoFeature = null },
+            confirmButton = { TextButton(onClick = { infoFeature = null }) { Text("OK") } },
+            icon = { Icon(f.icon, contentDescription = null) },
+            title = { Text(f.title) },
+            text = { Text(f.description) }
+        )
+    }
+
     val features = listOf(
-        FeatureItem("NFC Reader", Icons.Default.Nfc, "nfc"),
-        FeatureItem("EMV Reader", Icons.Default.CreditCard, "emv_reader"),
-        FeatureItem("EMV Emulation", Icons.Default.Contactless, "emv_emulation"),
-        FeatureItem("BadUSB", Icons.Default.Usb, "badusb"),
-        FeatureItem("BadUSB (root)", Icons.Default.Keyboard, "badusb_root"),
-        FeatureItem("BLE Spam", Icons.Default.Bluetooth, "bluetooth"),
-        FeatureItem("BLE Scanner", Icons.Default.BluetoothSearching, "ble_scanner"),
-        FeatureItem("BLE Beacon", Icons.Default.BluetoothAudio, "ble_beacon"),
-        FeatureItem("BLE Keyboard", Icons.Default.KeyboardAlt, "ble_keyboard"),
-        FeatureItem("Network Tools", Icons.Default.Router, "network"),
-        FeatureItem("Wifi Deauther", Icons.Default.WifiOff, "wifi_deauther"),
-        FeatureItem("WiFi Analyzer", Icons.Default.NetworkWifi, "wifi_analyzer"),
-        FeatureItem("Evil Portal", Icons.Default.Router, "evil_portal"),
-        FeatureItem("Wardriving", Icons.Default.Map, "wardriving"),
-        FeatureItem("Skimmer Detector", Icons.Default.CreditCardOff, "skimmer"),
-        FeatureItem("Infrared", Icons.Default.SettingsRemote, "ir"),
-        FeatureItem("IR Remotes", Icons.Default.Tv, "ir_remotes"),
-        FeatureItem("QR Scanner", Icons.Default.QrCodeScanner, "qr"),
-        FeatureItem("Password Generator", Icons.Default.Key, "password_generator"),
-        FeatureItem("2FA Vault", Icons.Default.Pin, "totp"),
-        FeatureItem("Flipper Files", Icons.Default.Folder, "flipper_files"),
-        FeatureItem("Logs", Icons.Default.Article, "logs"),
-        FeatureItem("Settings", Icons.Default.Settings, "settings"),
-        FeatureItem("About", Icons.Default.Info, "about")
+        FeatureItem("NFC Reader", Icons.Default.Nfc, "nfc",
+            "Read NFC tags: UID and type, NDEF text/URI, Mifare Classic dump with a key dictionary attack, and UID cloning to magic cards. Non-Mifare tags are still logged."),
+        FeatureItem("EMV Reader", Icons.Default.CreditCard, "emv_reader",
+            "Read a contactless bank card (PPSE → AID → GPO → records) to show card brand, PAN and expiry. Authorized testing only."),
+        FeatureItem("EMV Emulation", Icons.Default.Contactless, "emv_emulation",
+            "Emulate a contactless card via HCE: responds to a Visa SELECT AID, for testing terminals."),
+        FeatureItem("BadUSB", Icons.Default.Usb, "badusb",
+            "USB-Host keystroke injection: when a PC is connected, the phone types a script as a USB keyboard."),
+        FeatureItem("BadUSB (root)", Icons.Default.Keyboard, "badusb_root",
+            "Real USB-gadget BadUSB (root): streams HID reports to /dev/hidgX using a DuckyScript engine."),
+        FeatureItem("BLE Spam", Icons.Default.Bluetooth, "bluetooth",
+            "Broadcast fake pairing adverts (Apple, Samsung, Microsoft SwiftPair, Google Fast Pair) to trigger pop-ups on nearby devices. Legacy advertising caps payloads at 31 bytes."),
+        FeatureItem("BLE Scanner", Icons.Default.BluetoothSearching, "ble_scanner",
+            "Scan BLE devices and explore their GATT services and characteristics (read / write / notify)."),
+        FeatureItem("BLE Beacon", Icons.Default.BluetoothAudio, "ble_beacon",
+            "Broadcast BLE beacons: iBeacon, Eddystone-URL, or custom manufacturer data."),
+        FeatureItem("BLE Keyboard", Icons.Default.KeyboardAlt, "ble_keyboard",
+            "Act as a Bluetooth HID keyboard and type on a paired PC or tablet — no cable (Android 9+)."),
+        FeatureItem("Network Tools", Icons.Default.Router, "network",
+            "Ping, port scan, DNS lookup, traceroute, Wake-on-LAN, ARP table, ping sweep, and bundled nmap (root)."),
+        FeatureItem("Wifi Deauther", Icons.Default.WifiOff, "wifi_deauther",
+            "Scan Wi-Fi networks and attempt a deauth. Honest check: it needs root plus monitor-mode/packet injection, which most phone chipsets can't do."),
+        FeatureItem("WiFi Analyzer", Icons.Default.NetworkWifi, "wifi_analyzer",
+            "Scan Wi-Fi and view channel usage on 2.4 and 5 GHz. MAC spoofing requires root."),
+        FeatureItem("Evil Portal", Icons.Default.Router, "evil_portal",
+            "Open a local hotspot with a captive login page that captures submitted credentials. Clients must open the portal URL manually (no auto pop-up without root). Authorized testing only."),
+        FeatureItem("Wardriving", Icons.Default.Map, "wardriving",
+            "Map nearby Wi-Fi networks with GPS coordinates and export them to Wigle CSV."),
+        FeatureItem("Skimmer Detector", Icons.Default.CreditCardOff, "skimmer",
+            "Scan Bluetooth/BLE for cheap serial modules (HC-05/06, JDY…) often used in card skimmers. Heuristic hint, not proof."),
+        FeatureItem("Infrared", Icons.Default.SettingsRemote, "ir",
+            "Simple universal IR remote (NEC) for TV, AC, audio and projector. Requires an IR emitter."),
+        FeatureItem("IR Remotes", Icons.Default.Tv, "ir_remotes",
+            "Play Flipper .ir remotes from a code database, import your own, and run a TV-B-Gone style power sweep."),
+        FeatureItem("QR Scanner", Icons.Default.QrCodeScanner, "qr",
+            "Scan QR codes and barcodes with the camera; copy or open the result."),
+        FeatureItem("Password Generator", Icons.Default.Key, "password_generator",
+            "Generate strong passwords with SecureRandom, and show a QR code to transfer them."),
+        FeatureItem("2FA Vault", Icons.Default.Pin, "totp",
+            "Store TOTP (RFC 6238) accounts locally and generate 2FA codes. Secrets never leave the device."),
+        FeatureItem("Flipper Files", Icons.Default.Folder, "flipper_files",
+            "Open and inspect Flipper .nfc, .sub and .ir files."),
+        FeatureItem("Logs", Icons.Default.Article, "logs",
+            "Central activity log for all modules."),
+        FeatureItem("Settings", Icons.Default.Settings, "settings",
+            "App settings, including the dark-mode toggle."),
+        FeatureItem("About", Icons.Default.Info, "about",
+            "About FlipperDroid, credits and legal information.")
     )
 
     Scaffold(
@@ -132,6 +171,12 @@ fun HomeScreen(
                 .padding(paddingValues)
                 .background(MaterialTheme.colorScheme.background)
         ) {
+            Text(
+                "Tap to open · long-press a tile for a description",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)
+            )
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
                 contentPadding = PaddingValues(16.dp),
@@ -147,18 +192,19 @@ fun HomeScreen(
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .aspectRatio(1f),
+                            .aspectRatio(1f)
+                            .combinedClickable(
+                                onClick = {
+                                    if (feature.enabled) navController.navigate(feature.route)
+                                },
+                                onLongClick = { infoFeature = feature }
+                            ),
                         colors = CardDefaults.cardColors(
                             containerColor = if (feature.enabled)
                                 MaterialTheme.colorScheme.surfaceVariant
                             else
                                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                        ),
-                        onClick = {
-                            if (feature.enabled) {
-                                navController.navigate(feature.route)
-                            }
-                        }
+                        )
                     ) {
                         Column(
                             modifier = Modifier

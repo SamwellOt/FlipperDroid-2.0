@@ -43,7 +43,11 @@ class EmvReaderViewModel : ViewModel() {
                 if (data != null) {
                     _cardData.emit(data)
                 } else {
-                    _error.emit("Failed to read card data")
+                    _error.emit(
+                        "No EMV data could be read. Make sure it's a contactless payment card, " +
+                            "held steady against the NFC antenna. Some cards refuse contactless reads " +
+                            "outside a real terminal."
+                    )
                 }
             } catch (e: Exception) {
                 _error.emit("Error reading card: ${e.message}")
