@@ -25,6 +25,14 @@ class AdvertisementSetQueueHandler(
     private var spamHandler: Handler? = null
     private var spamRunnable: Runnable? = null
     var onSpamSent: ((AdvertisementSet) -> Unit)? = null
+    var onSpamError: ((AdvertisementSet?, AdvertisementError) -> Unit)? = null
+
+    init {
+        // S'enregistre auprès du service pour recevoir les callbacks succès/échec.
+        // Sans ça, les échecs d'advertising (ex. payload > 31 octets en legacy) étaient
+        // perdus et le spam était journalisé comme "envoyé" même en cas d'échec.
+        _advertisementService.addAdvertisementServiceCallback(this)
+    }
 
     fun setAdvertisementSets(advertisementSets: List<AdvertisementSet>) { _advertisementSets = advertisementSets; _currentIndex = 0 }
 
@@ -50,7 +58,7 @@ class AdvertisementSetQueueHandler(
     override fun onAdvertisementSetStart(advertisementSet: AdvertisementSet?) { _callbacks.forEach { it.onAdvertisementSetStart(advertisementSet) } }
     override fun onAdvertisementSetStop(advertisementSet: AdvertisementSet?) { _callbacks.forEach { it.onAdvertisementSetStop(advertisementSet) } }
     override fun onAdvertisementSetSucceeded(advertisementSet: AdvertisementSet?) { _callbacks.forEach { it.onAdvertisementSetSucceeded(advertisementSet) }; onAdvertisementComplete() }
-    override fun onAdvertisementSetFailed(advertisementSet: AdvertisementSet?, error: AdvertisementError) { _callbacks.forEach { it.onAdvertisementSetFailed(advertisementSet, error) }; onAdvertisementComplete() }
+    override fun onAdvertisementSetFailed(advertisementSet: AdvertisementSet?, error: AdvertisementError) { _callbacks.forEach { it.onAdvertisementSetFailed(advertisementSet, error) }; onSpamError?.invoke(advertisementSet, error); onAdvertisementComplete() }
 
     fun startSpam(advertisementSets: List<AdvertisementSet>) {
         stopSpam()

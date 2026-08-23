@@ -190,7 +190,8 @@ class WardrivingViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun frequencyToChannel(freq: Int): Int = when {
-        freq in 2412..2484 -> (freq - 2412) / 5 + 1
+        freq == 2484 -> 14 // le canal 14 est un cas particulier (2484 MHz)
+        freq in 2412..2472 -> (freq - 2412) / 5 + 1
         freq in 5170..5825 -> (freq - 5170) / 5 + 34
         else -> 0
     }

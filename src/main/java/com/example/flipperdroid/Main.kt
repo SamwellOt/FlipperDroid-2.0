@@ -16,7 +16,6 @@ import android.hardware.usb.UsbManager
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.os.Build
-import androidx.annotation.RequiresApi
 import com.example.flipperdroid.viewmodel.*
 import com.example.flipperdroid.view.*
 import com.example.flipperdroid.ui.theme.FlipperDroidTheme
@@ -36,6 +35,21 @@ import com.example.flipperdroid.viewmodel.ThemeViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+
+/**
+ * Extrait un [android.os.Parcelable] d'une Intent de façon compatible toutes
+ * versions : l'overload typé getParcelableExtra(name, Class) n'existe qu'à partir
+ * d'Android 13 (API 33). Comme minSdk = 24, l'appeler directement provoquerait un
+ * NoSuchMethodError sur les appareils plus anciens (crash au scan NFC / à la
+ * connexion USB). On retombe sur l'API dépréciée en dessous d'API 33.
+ */
+@Suppress("DEPRECATION")
+private inline fun <reified T : android.os.Parcelable> Intent.parcelableExtraCompat(name: String): T? =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        getParcelableExtra(name, T::class.java)
+    } else {
+        getParcelableExtra(name) as? T
+    }
 
 class MainActivity : ComponentActivity() {
 
@@ -62,7 +76,6 @@ class MainActivity : ComponentActivity() {
      *
      * @param savedInstanceState état sauvegardé de l'activité (peut être null).
      */
-    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -121,7 +134,6 @@ class MainActivity : ComponentActivity() {
      *
      * @param intent l'Intent reçue par l'activité (peut être null).
      */
-    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         intent?.let {
@@ -130,7 +142,7 @@ class MainActivity : ComponentActivity() {
             // Handle USB connection
             if (intent.action == UsbManager.ACTION_USB_DEVICE_ATTACHED) {
                 val device: UsbDevice? =
-                    intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+                    intent.parcelableExtraCompat(UsbManager.EXTRA_DEVICE)
                 val usbManager = getSystemService(USB_SERVICE) as UsbManager
                 device?.let { dev ->
                     if (usbManager.hasPermission(dev)) {
@@ -144,13 +156,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private fun handleNfcIntent(intent: Intent?) {
         if (intent?.action == NfcAdapter.ACTION_TAG_DISCOVERED ||
             intent?.action == NfcAdapter.ACTION_TECH_DISCOVERED ||
             intent?.action == NfcAdapter.ACTION_NDEF_DISCOVERED
         ) {
-            val tag: Tag? = intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java)
+            val tag: Tag? = intent.parcelableExtraCompat(NfcAdapter.EXTRA_TAG)
             tag?.let {
                 // Un tag Mifare Classic sera lu par nfcViewModel ; une carte EMV (IsoDep)
                 // sera lue par emvReaderViewModel. Chaque ViewModel ignore proprement

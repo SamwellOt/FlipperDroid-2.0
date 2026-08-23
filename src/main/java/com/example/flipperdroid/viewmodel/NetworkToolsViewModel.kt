@@ -244,7 +244,10 @@ class NetworkToolsViewModel : ViewModel() {
             try {
                 for (port in startPort..endPort) {
                     try {
-                        Socket(host, port).use {
+                        // Timeout de connexion explicite : sans lui, un port filtré peut
+                        // bloquer le scan très longtemps (timeout TCP par défaut de l'OS).
+                        Socket().use { sock ->
+                            sock.connect(InetSocketAddress(host, port), 400)
                             openPorts.add(port)
                         }
                     } catch (e: Exception) {
@@ -469,15 +472,12 @@ class NetworkToolsViewModel : ViewModel() {
                 //Log.d("NMAP_EXEC", "Commande exécutée : $fullCommand")
                 //Log.d("NMAP_EXEC", "Répertoire courant : ${System.getProperty("user.dir")}")
 
-                // Vérifier que les fichiers existent
-                val checkCmd = "ls -la $tmpDir"
-                val checkProcess = Runtime.getRuntime().exec(arrayOf("su", "-c", checkCmd))
-                val checkReader = BufferedReader(InputStreamReader(checkProcess.inputStream))
-
                 val process = Runtime.getRuntime().exec(command)
                 val reader = BufferedReader(InputStreamReader(process.inputStream))
                 val errorReader = BufferedReader(InputStreamReader(process.errorStream))
-                val output = StringBuilder()
+                // StringBuffer (synchronisé) : stdout et stderr sont lus par deux threads
+                // concurrents ; un StringBuilder non synchronisé pourrait corrompre/crasher.
+                val output = StringBuffer()
 
                 output.append("Command executed: $fullCommand\n\n")
 

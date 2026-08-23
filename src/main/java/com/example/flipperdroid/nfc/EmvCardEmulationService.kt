@@ -15,8 +15,10 @@ class EmvCardEmulationService : HostApduService() {
 
     override fun processCommandApdu(commandApdu: ByteArray?, extras: Bundle?): ByteArray {
         Log.d(TAG, "processCommandApdu: ${commandApdu?.joinToString { String.format("%02X", it) }}")
-        // Simple SELECT AID check
-        if (commandApdu != null && commandApdu.size >= 7) {
+        // Simple SELECT AID check. Le SELECT par AID Visa fait 12 octets minimum
+        // (CLA INS P1 P2 Lc + 7 octets d'AID) ; toute commande plus courte ne peut
+        // pas contenir cet AID, on évite ainsi un copyOfRange hors limites.
+        if (commandApdu != null && commandApdu.size >= 12) {
             val aid = commandApdu.copyOfRange(5, 12)
             if (aid.contentEquals(VISA_AID)) {
                 // Réponse simulée : juste un succès

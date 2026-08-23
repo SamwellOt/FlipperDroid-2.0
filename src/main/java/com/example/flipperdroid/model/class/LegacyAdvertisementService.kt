@@ -116,7 +116,14 @@ class LegacyAdvertisementService(context: Context): IAdvertisementService {
         return object : AdvertiseCallback() {
             override fun onStartFailure(errorCode: Int) {
                 super.onStartFailure(errorCode)
+                // On mappe le vrai code d'erreur (auparavant tout était réduit à UNKNOWN,
+                // masquant notamment DATA_TOO_LARGE pour les payloads > 31 octets).
                 val advertisementError = when (errorCode) {
+                    ADVERTISE_FAILED_ALREADY_STARTED -> AdvertisementError.ADVERTISE_FAILED_ALREADY_STARTED
+                    ADVERTISE_FAILED_DATA_TOO_LARGE -> AdvertisementError.ADVERTISE_FAILED_DATA_TOO_LARGE
+                    ADVERTISE_FAILED_FEATURE_UNSUPPORTED -> AdvertisementError.ADVERTISE_FAILED_FEATURE_UNSUPPORTED
+                    ADVERTISE_FAILED_INTERNAL_ERROR -> AdvertisementError.ADVERTISE_FAILED_INTERNAL_ERROR
+                    ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> AdvertisementError.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS
                     else -> AdvertisementError.ADVERTISE_FAILED_UNKNOWN
                 }
                 _advertisementServiceCallbacks.map {

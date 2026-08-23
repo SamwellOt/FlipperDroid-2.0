@@ -92,11 +92,11 @@ fun WifiDeautherScreen(
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val allGranted = permissions.entries.all { it.value }
-        if (allGranted) {
-            viewModel.initialize(context)
-        }
+    ) { _ ->
+        // Réévalue les permissions après la réponse (même partielle) : sur Android < 13
+        // NEARBY_WIFI_DEVICES n'existe pas, donc "tout accordé" ne serait jamais vrai
+        // et le scan resterait bloqué.
+        viewModel.initialize(context)
     }
 
     LaunchedEffect(Unit) {
@@ -147,7 +147,10 @@ fun WifiDeautherScreen(
                             Manifest.permission.ACCESS_NETWORK_STATE
                         )
 
-                        permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+                        // NEARBY_WIFI_DEVICES uniquement sur Android 13+ (sinon inexistante)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+                        }
 
                         permissionLauncher.launch(permissions.toTypedArray())
                     },

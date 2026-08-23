@@ -67,12 +67,18 @@ class RootBadUsbViewModel : ViewModel() {
                 // Shell root persistant dont stdin est redirigé vers le device HID.
                 val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat > $dev"))
                 val out = process.outputStream
-                _status.value = "Executing DuckyScript..."
-                com.example.flipperdroid.util.AppLog.log("BadUSB", "Executing DuckyScript on $dev")
-                executeDucky(_script.value, out)
-                try { out.flush(); out.close() } catch (_: Exception) {}
-                try { process.destroy() } catch (_: Exception) {}
-                _status.value = "Script finished."
+                try {
+                    _status.value = "Executing DuckyScript..."
+                    com.example.flipperdroid.util.AppLog.log("BadUSB", "Executing DuckyScript on $dev")
+                    executeDucky(_script.value, out)
+                    _status.value = "Script finished."
+                } finally {
+                    // Cleanup dans finally : sur annulation (stop()), executeDucky lève une
+                    // CancellationException — sans ce finally, le process root et son flux
+                    // resteraient ouverts.
+                    try { out.flush(); out.close() } catch (_: Exception) {}
+                    try { process.destroy() } catch (_: Exception) {}
+                }
             } catch (e: Exception) {
                 _status.value = "Error: ${e.message}"
                 Log.e("RootBadUsb", "runScript", e)

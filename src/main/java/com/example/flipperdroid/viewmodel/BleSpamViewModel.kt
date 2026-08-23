@@ -52,12 +52,19 @@ class BleSpamViewModel(app: Application) : AndroidViewModel(app) {
             val log = "[${System.currentTimeMillis() % 100000}] ${(if (set.title.isNotBlank()) set.title else set.toString())} (${set.type})"
             _spamLogs.value = (_spamLogs.value + log).takeLast(100)
         }
+        // Report honnête des échecs (ex. DATA_TOO_LARGE : payload > 31 octets rejeté
+        // par l'advertising legacy) au lieu de laisser croire à un envoi réussi.
+        handler.onSpamError = { set, error ->
+            val name = set?.title?.takeIf { it.isNotBlank() } ?: set?.type?.toString() ?: "?"
+            _spamLogs.value = (_spamLogs.value + "⚠ FAILED: $name ($error)").takeLast(100)
+        }
         handler.startSpam(sets)
     }
 
     fun stopSpam() {
         _isActive.value = false
         handler.onSpamSent = null
+        handler.onSpamError = null
         handler.stopSpam()
     }
 

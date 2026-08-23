@@ -87,12 +87,13 @@ class BeaconViewModel : ViewModel() {
         try {
             val (scheme, rest) = encodeUrlScheme(url)
             val body = rest.toByteArray(Charsets.US_ASCII)
-            val frame = ByteArray(4 + body.size)
+            // Trame Eddystone-URL = [0x10][txPower][urlScheme][URL encodée]. Pas d'octet
+            // supplémentaire : un 0x00 en fin serait interprété comme le suffixe ".com/".
+            val frame = ByteArray(3 + body.size)
             frame[0] = 0x10           // Eddystone-URL frame
             frame[1] = 0xC5.toByte()  // TX power
             frame[2] = scheme
             System.arraycopy(body, 0, frame, 3, body.size)
-            // (dernier octet reste 0)
             val data = AdvertiseData.Builder()
                 .addServiceUuid(ParcelUuid(UUID.fromString("0000FEAA-0000-1000-8000-00805F9B34FB")))
                 .addServiceData(ParcelUuid(UUID.fromString("0000FEAA-0000-1000-8000-00805F9B34FB")), frame)

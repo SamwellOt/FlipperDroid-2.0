@@ -61,18 +61,20 @@ class NfcViewModel(app: Application) : AndroidViewModel(app) {
         val id = tag.id?.let { MifareClassicUtils.bytesToHex(it) } ?: "-"
         _currentTagUid.value = id
 
-        // Lecture NDEF si le tag la supporte (texte / URI)
-        readNdef(tag)
-
-        val mfc = android.nfc.tech.MifareClassic.get(tag)
-        if (mfc == null) {
-            // Tag non-Mifare (ex: carte EMV IsoDep) : traité par un autre lecteur.
-            addLog("Tag non compatible MifareClassic")
-            return
-        }
-
-        _currentTagType.value = "Mifare Classic"
         viewModelScope.launch(Dispatchers.IO) {
+            // NDEF puis MifareClassic, séquentiellement : deux technologies NFC ne
+            // peuvent pas être connectées en même temps au même tag. Les lancer en
+            // parallèle provoquait des échecs de lecture intermittents.
+            readNdef(tag)
+
+            val mfc = android.nfc.tech.MifareClassic.get(tag)
+            if (mfc == null) {
+                // Tag non-Mifare (ex: carte EMV IsoDep) : traité par un autre lecteur.
+                addLog("Tag non compatible MifareClassic")
+                return@launch
+            }
+
+            _currentTagType.value = "Mifare Classic"
             val dump = mutableListOf<String>()
             try {
                 mfc.connect()
@@ -109,35 +111,35 @@ class NfcViewModel(app: Application) : AndroidViewModel(app) {
     }
     /**
      * Lit un message NDEF (texte/URI) si le tag le supporte.
+     * Appelée depuis la coroutine IO de [onTagScanned] : bloquante et non relancée,
+     * pour ne pas connecter Ndef et MifareClassic simultanément au même tag.
      */
     private fun readNdef(tag: Tag) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val ndef = android.nfc.tech.Ndef.get(tag) ?: return@launch
-                ndef.connect()
-                val message = ndef.ndefMessage ?: ndef.cachedNdefMessage
-                ndef.close()
-                if (message != null) {
-                    val text = message.records.joinToString("\n") { record ->
-                        val payload = record.payload
-                        when {
-                            record.toUri() != null -> "URI: ${record.toUri()}"
-                            payload.isNotEmpty() -> {
-                                // Enregistrement Texte NDEF : 1er octet = statut (longueur du code langue)
-                                val langLen = payload[0].toInt() and 0x3F
-                                if (payload.size > langLen + 1) {
-                                    "Text: ${String(payload, langLen + 1, payload.size - langLen - 1, Charsets.UTF_8)}"
-                                } else String(payload, Charsets.UTF_8)
-                            }
-                            else -> "(empty record)"
+        try {
+            val ndef = android.nfc.tech.Ndef.get(tag) ?: return
+            ndef.connect()
+            val message = ndef.ndefMessage ?: ndef.cachedNdefMessage
+            ndef.close()
+            if (message != null) {
+                val text = message.records.joinToString("\n") { record ->
+                    val payload = record.payload
+                    when {
+                        record.toUri() != null -> "URI: ${record.toUri()}"
+                        payload.isNotEmpty() -> {
+                            // Enregistrement Texte NDEF : 1er octet = statut (longueur du code langue)
+                            val langLen = payload[0].toInt() and 0x3F
+                            if (payload.size > langLen + 1) {
+                                "Text: ${String(payload, langLen + 1, payload.size - langLen - 1, Charsets.UTF_8)}"
+                            } else String(payload, Charsets.UTF_8)
                         }
+                        else -> "(empty record)"
                     }
-                    _ndefContent.value = text
-                    addLog("NDEF lu (${message.records.size} enregistrement(s))")
                 }
-            } catch (e: Exception) {
-                // Tag non NDEF : silencieux
+                _ndefContent.value = text
+                addLog("NDEF lu (${message.records.size} enregistrement(s))")
             }
+        } catch (e: Exception) {
+            // Tag non NDEF : silencieux
         }
     }
 

@@ -171,33 +171,39 @@ class EmvCardReader {
      * @param cardData objet contenant les champs extraits
      */
     private fun parseRecordData(data: ByteArray, cardData: EmvCardData) {
-        // Recherche du tag 0x5A (PAN) et 0x5F24 (date d'expiration)
+        // Recherche des tags 0x5A (PAN), 0x5F24 (date d'expiration) et 0x5F20 (porteur).
+        // NB : la longueur TLV doit être lue en non signé (and 0xFF) et bornée, sinon
+        // une donnée tronquée/malformée ferait planter copyOfRange.
         var i = 0
         while (i < data.size) {
             val tag = data[i].toInt() and 0xFF
-            when (tag) {
-                0x5A -> { // PAN
-                    val len = data.getOrNull(i + 1)?.toInt() ?: break
-                    val panBytes = data.copyOfRange(i + 2, i + 2 + len)
-                    cardData.pan = formatPan(bytesToHexString(panBytes))
-                    i += 2 + len
+            when {
+                tag == 0x5A -> { // PAN
+                    val len = data.getOrNull(i + 1)?.toInt()?.and(0xFF) ?: break
+                    val end = i + 2 + len
+                    if (len <= 0 || end > data.size) { i++; continue }
+                    cardData.pan = formatPan(bytesToHexString(data.copyOfRange(i + 2, end)))
+                    i = end
                 }
-                0x5F -> {
-                    val nextTag = data.getOrNull(i + 1)?.toInt() ?: break
-                    if (nextTag == 0x24) { // Expiry date
-                        val len = data.getOrNull(i + 2)?.toInt() ?: break
-                        val dateBytes = data.copyOfRange(i + 3, i + 3 + len)
-                        cardData.expiryDate = formatExpiryDate(bytesToHexString(dateBytes))
-                        i += 3 + len
-                    } else {
-                        i++
+                tag == 0x5F -> {
+                    val subTag = data.getOrNull(i + 1)?.toInt()?.and(0xFF) ?: break
+                    when (subTag) {
+                        0x24 -> { // Expiry date (5F24)
+                            val len = data.getOrNull(i + 2)?.toInt()?.and(0xFF) ?: break
+                            val end = i + 3 + len
+                            if (len <= 0 || end > data.size) { i++; continue }
+                            cardData.expiryDate = formatExpiryDate(bytesToHexString(data.copyOfRange(i + 3, end)))
+                            i = end
+                        }
+                        0x20 -> { // Cardholder name (5F20)
+                            val len = data.getOrNull(i + 2)?.toInt()?.and(0xFF) ?: break
+                            val end = i + 3 + len
+                            if (len <= 0 || end > data.size) { i++; continue }
+                            cardData.cardholderName = data.copyOfRange(i + 3, end).toString(Charsets.UTF_8).trim()
+                            i = end
+                        }
+                        else -> i++
                     }
-                }
-                0x5F20 -> { // Cardholder name (optionnel)
-                    val len = data.getOrNull(i + 1)?.toInt() ?: break
-                    val nameBytes = data.copyOfRange(i + 2, i + 2 + len)
-                    cardData.cardholderName = nameBytes.toString(Charsets.UTF_8).trim()
-                    i += 2 + len
                 }
                 else -> i++
             }
@@ -216,8 +222,10 @@ class EmvCardReader {
         while (i < data.size) {
             val tag = data[i].toInt() and 0xFF
             if (tag == 0x57) {
-                val len = data.getOrNull(i + 1)?.toInt() ?: break
-                val track2 = data.copyOfRange(i + 2, i + 2 + len)
+                val len = data.getOrNull(i + 1)?.toInt()?.and(0xFF) ?: break
+                val end = i + 2 + len
+                if (len <= 0 || end > data.size) break
+                val track2 = data.copyOfRange(i + 2, end)
                 val track2Str = bytesToHexString(track2)
                 // Format Track2 : PAN=valeur, séparateur D, date d'expiration (YYMM)
                 val parts = track2Str.split("D")
