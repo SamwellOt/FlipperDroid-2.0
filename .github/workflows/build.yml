@@ -6,6 +6,8 @@ on:
     tags: [ 'v*' ]
   pull_request:
     branches: [ main, master ]
+  release:
+    types: [ published ]   # ao publicar um Release pelo site, anexa o APK a ele
   workflow_dispatch:   # permite disparar manualmente pela aba Actions
 
 permissions:
