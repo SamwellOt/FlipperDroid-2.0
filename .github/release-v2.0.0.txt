@@ -1,0 +1,69 @@
+FlipperDroid v2.0.0 - Professional Red Team Edition
+====================================================
+
+Release Date: 2026-09-11
+Commit: 7844027a4f971f838aedc12285ef5b730e44f5cd
+Tag: v2.0.0
+
+🎯 MAJOR RELEASE - Professional Red Team Edition
+
+This release introduces a comprehensive red team toolkit with 5 new attack/analysis modules
+designed for authorized penetration testing and security research.
+
+NEW FEATURES:
+=============
+
+1. BLE GATT Fuzzer
+   - Discover vulnerabilities in BLE devices
+   - 16+ fuzzing payloads (overflow, injection, format strings)
+   - Automated GATT discovery
+   - Real-time vulnerability detection
+
+2. NFC Relay Attack
+   - APDU exchange capture from NFC cards
+   - Remote relay server support
+   - Sequence replay for testing
+   - Exportable capture logs
+
+3. Packet Sniffer
+   - Network traffic capture with tcpdump
+   - BPF filter support
+   - Real-time statistics
+   - CSV export
+   - Requires: Root + tcpdump
+
+4. IoT Protocol Scanner
+   - MQTT broker detection (1883)
+   - CoAP server discovery (5683)
+   - Common IoT service scanning
+   - Topic/resource enumeration
+   - Configurable IP ranges
+
+5. Report Generator
+   - Professional pentest report generation
+   - CVSS scoring support
+   - Multiple export formats (Markdown, HTML, JSON)
+   - Statistical summaries
+
+STATISTICS:
+===========
+- Files Added: 17
+- Lines of Code: 2,849
+- New ViewModels: 5
+- New Screens: 5
+
+LEGAL NOTICE:
+=============
+All features designed for:
+✅ Authorized penetration testing
+✅ Security research
+✅ Vulnerability assessment with consent
+
+Prohibited:
+❌ Unauthorized network access
+❌ Interception without consent
+❌ Testing without authorization
+
+Users must comply with all applicable laws (CFAA, GDPR, local regulations).
+
+For detailed release notes, see: CHANGELOG.md
