@@ -50,3 +50,19 @@ jobs:
         with:
           files: build/outputs/apk/debug/*.apk
           generate_release_notes: true
+
+      - name: Publish v2.0.0 Release with APK (on main)
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v2.0.0
+          name: FlipperDroid v2.0.0 - Professional Red Team Edition
+          files: build/outputs/apk/debug/*.apk
+          body: |
+            FlipperDroid v2.0.0 — Professional Red Team Edition
+
+            New modules: BLE GATT Fuzzer, NFC Relay Attack, Packet Sniffer,
+            IoT Protocol Scanner, Report Generator.
+
+            The APK below is the debug build produced by CI (installable on
+            Android 10+). For authorized security testing only.
