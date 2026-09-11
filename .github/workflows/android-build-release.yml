@@ -1,0 +1,77 @@
+name: Android Build Release
+
+on:
+  release:
+    types: [published, created]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '11'
+        cache: gradle
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      with:
+        api-level: 35
+        ndk-version: 25.2.9519653
+
+    - name: Create local.properties
+      run: |
+        echo "sdk.dir=$ANDROID_HOME" > local.properties
+        cat local.properties
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x ./gradlew
+
+    - name: Build release APK
+      run: ./gradlew assembleRelease --stacktrace
+      env:
+        GRADLE_OPTS: -Xmx4096m
+
+    - name: Sign APK
+      run: |
+        jarsigner -verbose -sigalg SHA1withRSA -digestalg SHA1 \
+          -keystore flipperdroid-release.jks \
+          -storepass flipperdroid123 \
+          -keypass flipperdroid123 \
+          build/outputs/apk/release/app-release-unsigned.apk \
+          flipperdroid
+
+    - name: Align APK
+      run: |
+        ${ANDROID_HOME}/build-tools/35.0.0/zipalign -v 4 \
+          build/outputs/apk/release/app-release-unsigned.apk \
+          app-release-signed.apk
+
+    - name: Verify APK
+      run: |
+        ls -lh app-release-signed.apk
+        ${ANDROID_HOME}/build-tools/35.0.0/apksigner verify -v app-release-signed.apk
+
+    - name: Upload APK to Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: app-release-signed.apk
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Upload APK as artifact
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: apk-release
+        path: app-release-signed.apk
+        retention-days: 90
