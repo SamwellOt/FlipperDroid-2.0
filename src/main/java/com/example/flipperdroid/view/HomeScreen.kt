@@ -163,7 +163,17 @@ fun HomeScreen(
         FeatureItem("Settings", Icons.Default.Settings, "settings",
             "App settings, including the dark-mode toggle."),
         FeatureItem("About", Icons.Default.Info, "about",
-            "About FlipperDroid, credits and legal information.")
+            "About FlipperDroid, credits and legal information."),
+        FeatureItem("BLE Fuzzer", Icons.Default.BugReport, "ble_fuzzer",
+            "BLE GATT Fuzzer: discover vulnerabilities by writing malformed payloads to BLE characteristics."),
+        FeatureItem("NFC Relay Attack", Icons.Default.Nfc, "nfc_relay",
+            "Capture and relay NFC/EMV exchanges. Advanced testing for NFC card security."),
+        FeatureItem("Packet Sniffer", Icons.Default.Router, "packet_sniffer",
+            "Capture and analyze network packets (requires tcpdump + root). Export to CSV."),
+        FeatureItem("IoT Scanner", Icons.Default.Scanner, "iot_scanner",
+            "Discover MQTT brokers, CoAP servers, and common IoT services on a network."),
+        FeatureItem("Report Generator", Icons.Default.Article, "report_generator",
+            "Build professional penetration test reports with findings, recommendations, and multiple export formats.")
     )
 
     Scaffold(

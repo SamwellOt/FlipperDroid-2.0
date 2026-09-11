@@ -349,6 +349,21 @@ class MainActivity : ComponentActivity() {
                     title = "Legacy Notice"
                 )
             }
+            composable("ble_fuzzer") {
+                BleGattFuzzerScreen(navController = navController)
+            }
+            composable("nfc_relay") {
+                NfcRelayAttackScreen(navController = navController)
+            }
+            composable("packet_sniffer") {
+                PacketSnifferScreen(navController = navController)
+            }
+            composable("iot_scanner") {
+                IotProtocolScannerScreen(navController = navController)
+            }
+            composable("report_generator") {
+                ReportGeneratorScreen(navController = navController)
+            }
         }
     }
 }
