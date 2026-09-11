@@ -18,7 +18,7 @@ data class PacketCapture(
 object PacketSniffer {
 
     suspend fun startTcpdump(
-        interface: String = "any",
+        iface: String = "any",
         filter: String = "",
         maxPackets: Int = 100,
         outputFile: String? = null,
@@ -28,7 +28,7 @@ object PacketSniffer {
             val commands = mutableListOf("tcpdump")
 
             // Interface
-            commands.addAll(listOf("-i", interface))
+            commands.addAll(listOf("-i", iface))
 
             // No DNS resolution
             commands.add("-n")
@@ -49,7 +49,7 @@ object PacketSniffer {
                 commands.addAll(listOf("-w", outputFile))
             }
 
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", commands.joinToString(" ")})
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", commands.joinToString(" ")))
             val reader = BufferedReader(InputStreamReader(process.inputStream))
 
             var line: String?

@@ -57,29 +57,29 @@ class ReportGeneratorViewModel : ViewModel() {
         )
 
         _findings.value = _findings.value + finding
-        AppLog.i("Finding added: $id - $title")
+        AppLog.log("Report", "Finding added: $id - $title")
     }
 
     fun removeFinding(id: String) {
         _findings.value = _findings.value.filter { it.id != id }
-        AppLog.i("Finding removed: $id")
+        AppLog.log("Report", "Finding removed: $id")
     }
 
     fun addRecommendation(recommendation: String) {
         _recommendations.value = _recommendations.value + recommendation
-        AppLog.i("Recommendation added: $recommendation")
+        AppLog.log("Report", "Recommendation added: $recommendation")
     }
 
     fun addTimelineEvent(event: String) {
         _timeline.value = _timeline.value + "- ${LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"))} $event"
-        AppLog.i("Timeline event added: $event")
+        AppLog.log("Report", "Timeline event added: $event")
     }
 
     fun setReportMetadata(title: String, tester: String, target: String) {
         _reportTitle.value = title
         _testerName.value = tester
         _targetSystem.value = target
-        AppLog.i("Report metadata updated")
+        AppLog.log("Report", "Report metadata updated")
     }
 
     fun generateMarkdownReport() {
@@ -95,7 +95,7 @@ class ReportGeneratorViewModel : ViewModel() {
             )
 
             _generatedReport.value = ReportGenerator.generateMarkdownReport(report)
-            AppLog.i("Markdown report generated")
+            AppLog.log("Report", "Markdown report generated")
         }
     }
 
@@ -112,7 +112,7 @@ class ReportGeneratorViewModel : ViewModel() {
             )
 
             _generatedReport.value = ReportGenerator.generateHtmlReport(report)
-            AppLog.i("HTML report generated")
+            AppLog.log("Report", "HTML report generated")
         }
     }
 
@@ -129,7 +129,7 @@ class ReportGeneratorViewModel : ViewModel() {
             )
 
             _generatedReport.value = ReportGenerator.generateJsonReport(report)
-            AppLog.i("JSON report generated")
+            AppLog.log("Report", "JSON report generated")
         }
     }
 
@@ -152,6 +152,6 @@ class ReportGeneratorViewModel : ViewModel() {
         _recommendations.value = emptyList()
         _timeline.value = emptyList()
         _generatedReport.value = ""
-        AppLog.i("Report cleared")
+        AppLog.log("Report", "Report cleared")
     }
 }

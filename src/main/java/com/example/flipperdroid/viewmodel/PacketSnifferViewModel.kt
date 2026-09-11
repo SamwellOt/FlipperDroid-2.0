@@ -35,7 +35,7 @@ class PacketSnifferViewModel : ViewModel() {
         val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
         val newLog = "[$timestamp] $message\n" + _snifferLog.value
         _snifferLog.value = newLog.take(5000)
-        AppLog.i("PacketSniffer: $message")
+        AppLog.log("PacketSniffer", message)
     }
 
     fun startSniffing(maxPackets: Int = 100) {
@@ -50,7 +50,7 @@ class PacketSnifferViewModel : ViewModel() {
             val capturedPackets = mutableListOf<PacketCapture>()
 
             val result = PacketSniffer.startTcpdump(
-                interface = _selectedInterface.value,
+                iface = _selectedInterface.value,
                 filter = _filterExpression.value,
                 maxPackets = maxPackets,
                 onPacket = { packet ->
@@ -76,9 +76,9 @@ class PacketSnifferViewModel : ViewModel() {
         addLog("Sniffing stopped")
     }
 
-    fun setInterface(interface: String) {
-        _selectedInterface.value = interface
-        addLog("Interface set to: $interface")
+    fun setInterface(iface: String) {
+        _selectedInterface.value = iface
+        addLog("Interface set to: $iface")
     }
 
     fun setFilter(filter: String) {

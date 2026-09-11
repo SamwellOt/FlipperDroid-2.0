@@ -33,7 +33,7 @@ class NfcRelayAttackViewModel : androidx.lifecycle.ViewModel() {
         val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
         val newLog = "[$timestamp] $message\n" + _relayLog.value
         _relayLog.value = newLog.take(5000)
-        AppLog.i("NFC-Relay: $message")
+        AppLog.log("NFC-Relay", message)
     }
 
     fun captureRelayAttack(tag: Tag) {

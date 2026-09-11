@@ -32,7 +32,7 @@ class IotProtocolScannerViewModel : ViewModel() {
         val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
         val newLog = "[$timestamp] $message\n" + _scanLog.value
         _scanLog.value = newLog.take(5000)
-        AppLog.i("IotScanner: $message")
+        AppLog.log("IotScanner", message)
     }
 
     fun startScan(mode: String = "common", range: String = "") {

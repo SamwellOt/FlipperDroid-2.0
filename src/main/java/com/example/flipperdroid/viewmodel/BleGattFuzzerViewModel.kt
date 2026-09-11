@@ -51,7 +51,7 @@ class BleGattFuzzerViewModel(private val context: Context) : ViewModel() {
         val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
         val newLog = "[$timestamp] $message\n" + _log.value
         _log.value = newLog.take(5000)
-        AppLog.i("GATT-Fuzzer: $message")
+        AppLog.log("GATT-Fuzzer", message)
     }
 
     fun startFuzzing(device: BluetoothDevice) {
