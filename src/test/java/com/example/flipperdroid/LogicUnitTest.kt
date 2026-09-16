@@ -166,6 +166,34 @@ class LogicUnitTest {
         assertEquals(140, cold.size)
     }
 
+    // --- AC : toutes les marques encodent une trame déterministe et non vide ---
+    @Test
+    fun ac_all_brands_encode() {
+        for (brand in AcProtocols.Brand.values()) {
+            val (freq, pattern) = AcProtocols.encode(
+                brand, power = true, mode = AcProtocols.MODE_COOL,
+                tempC = 24, fan = AcProtocols.FAN_AUTO, swing = false
+            )
+            assertEquals(38000, freq)
+            assertTrue("trame vide pour $brand", pattern.size > 8)
+            // Déterministe : mêmes entrées → même trame.
+            val (_, again) = AcProtocols.encode(
+                brand, true, AcProtocols.MODE_COOL, 24, AcProtocols.FAN_AUTO, false
+            )
+            assertArrayEquals(again, pattern)
+        }
+    }
+
+    @Test
+    fun ac_temp_changes_frame() {
+        // Deux températures différentes doivent produire des trames différentes.
+        for (brand in listOf(AcProtocols.Brand.LG, AcProtocols.Brand.FUJITSU, AcProtocols.Brand.DAIKIN)) {
+            val (_, a) = AcProtocols.encode(brand, true, AcProtocols.MODE_COOL, 18, AcProtocols.FAN_AUTO, false)
+            val (_, b) = AcProtocols.encode(brand, true, AcProtocols.MODE_COOL, 28, AcProtocols.FAN_AUTO, false)
+            assertFalse("température ignorée pour $brand", a.contentEquals(b))
+        }
+    }
+
     // --- .ir file parsing ---
     @Test
     fun irfile_parse_parsed_and_raw() {
