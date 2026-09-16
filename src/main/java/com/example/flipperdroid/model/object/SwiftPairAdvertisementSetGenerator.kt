@@ -18,6 +18,8 @@ import com.example.flipperdroid.model.enums.AdvertiseMode
 object SwiftPairAdvertisementSetGenerator {
     private const val manufacturerId = 0x0006 // Microsoft
 
+    // Le nom est affiché tel quel dans la popup Swift Pair de Windows : ASCII
+    // arbitraire, donc chaque entrée fonctionne sans base de données côté cible.
     private val deviceNames = listOf(
         "Surface Keyboard",
         "Surface Mouse",
@@ -27,6 +29,26 @@ object SwiftPairAdvertisementSetGenerator {
         "Surface Earbuds",
         "Surface Dock",
         "Microsoft Arc Mouse",
+        "Surface Precision Mouse",
+        "Surface Ergonomic Keyboard",
+        "Xbox Elite Controller",
+        "Xbox Adaptive Controller",
+        "Microsoft Sculpt Keyboard",
+        "Microsoft Modern Keyboard",
+        "Microsoft Bluetooth Mouse",
+        "Surface Slim Pen 2",
+        "Logitech MX Master 3",
+        "Logitech MX Keys",
+        "Logitech Pebble",
+        "Bose QC Ultra",
+        "Sony WH-1000XM5",
+        "JBL Live 660NC",
+        "AirPods Pro",
+        "Galaxy Buds2 Pro",
+        "DJI Mic",
+        "Razer BlackShark V2",
+        "Keychron K8",
+        "Sennheiser Momentum 4",
     )
 
     fun getAdvertisementSets(): List<AdvertisementSet> {
