@@ -247,6 +247,12 @@ class MainActivity : ComponentActivity() {
             composable("ir_remotes") {
                 IrRemoteScreen(navController = navController)
             }
+            composable("ir_tools") {
+                IrToolsScreen(navController = navController)
+            }
+            composable("ac_control") {
+                AcControlScreen(navController = navController)
+            }
             composable("password_generator") {
                 PasswordGeneratorScreen(navController = navController)
             }

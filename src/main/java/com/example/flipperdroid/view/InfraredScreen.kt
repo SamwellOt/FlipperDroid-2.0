@@ -3,6 +3,8 @@ package com.example.flipperdroid.view
 import android.content.Context
 import android.hardware.ConsumerIrManager
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -59,6 +61,9 @@ private val TV_BRANDS = listOf(
     BrandProfile("Sony", "SIRC", 0x01, mapOf(
         "power" to 0x15, "vol_up" to 0x12, "vol_dn" to 0x13,
         "ch_up" to 0x10, "ch_dn" to 0x11, "mute" to 0x14, "source" to 0x25,
+        "menu" to 0x36, "up" to 0x74, "down" to 0x75,
+        "left" to 0x34, "right" to 0x33, "ok" to 0x65,
+        "back" to 0x63, "home" to 0x60,
         "0" to 0x00, "1" to 0x01, "2" to 0x02, "3" to 0x03,
         "4" to 0x04, "5" to 0x05, "6" to 0x06, "7" to 0x07,
         "8" to 0x08, "9" to 0x09
@@ -210,16 +215,16 @@ fun InfraredScreen(navController: NavController) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Volume", style = MaterialTheme.typography.labelSmall)
                         Spacer(Modifier.height(4.dp))
-                        RemoteButton(Icons.AutoMirrored.Filled.VolumeUp, "Vol+") { sendCommand("vol_up") }
+                        RemoteButton(Icons.AutoMirrored.Filled.VolumeUp, "Vol+", repeatOnHold = true) { sendCommand("vol_up") }
                         Spacer(Modifier.height(8.dp))
-                        RemoteButton(Icons.AutoMirrored.Filled.VolumeDown, "Vol-") { sendCommand("vol_dn") }
+                        RemoteButton(Icons.AutoMirrored.Filled.VolumeDown, "Vol-", repeatOnHold = true) { sendCommand("vol_dn") }
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Channel", style = MaterialTheme.typography.labelSmall)
                         Spacer(Modifier.height(4.dp))
-                        RemoteButton(Icons.Default.KeyboardArrowUp, "Ch+") { sendCommand("ch_up") }
+                        RemoteButton(Icons.Default.KeyboardArrowUp, "Ch+", repeatOnHold = true) { sendCommand("ch_up") }
                         Spacer(Modifier.height(8.dp))
-                        RemoteButton(Icons.Default.KeyboardArrowDown, "Ch-") { sendCommand("ch_dn") }
+                        RemoteButton(Icons.Default.KeyboardArrowDown, "Ch-", repeatOnHold = true) { sendCommand("ch_dn") }
                     }
                 }
 
@@ -233,7 +238,7 @@ fun InfraredScreen(navController: NavController) {
                             RemoteButton(Icons.Default.Menu, "Menu") { sendCommand("menu") }
                             Spacer(Modifier.width(16.dp))
                         }
-                        RemoteButton(Icons.Default.KeyboardArrowUp, "Up") { sendCommand("up") }
+                        RemoteButton(Icons.Default.KeyboardArrowUp, "Up", repeatOnHold = true) { sendCommand("up") }
                         if (selectedBrand.commands.containsKey("home")) {
                             Spacer(Modifier.width(16.dp))
                             RemoteButton(Icons.Default.Home, "Home") { sendCommand("home") }
@@ -241,7 +246,7 @@ fun InfraredScreen(navController: NavController) {
                     }
                     Spacer(Modifier.height(4.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                        RemoteButton(Icons.Default.KeyboardArrowLeft, "Left") { sendCommand("left") }
+                        RemoteButton(Icons.Default.KeyboardArrowLeft, "Left", repeatOnHold = true) { sendCommand("left") }
                         Spacer(Modifier.width(8.dp))
                         FilledTonalButton(
                             onClick = { sendCommand("ok") },
@@ -249,7 +254,7 @@ fun InfraredScreen(navController: NavController) {
                             contentPadding = PaddingValues(0.dp)
                         ) { Text("OK") }
                         Spacer(Modifier.width(8.dp))
-                        RemoteButton(Icons.Default.KeyboardArrowRight, "Right") { sendCommand("right") }
+                        RemoteButton(Icons.Default.KeyboardArrowRight, "Right", repeatOnHold = true) { sendCommand("right") }
                     }
                     Spacer(Modifier.height(4.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
@@ -257,7 +262,7 @@ fun InfraredScreen(navController: NavController) {
                             RemoteButton(Icons.AutoMirrored.Filled.ArrowBack, "Back") { sendCommand("back") }
                             Spacer(Modifier.width(16.dp))
                         }
-                        RemoteButton(Icons.Default.KeyboardArrowDown, "Down") { sendCommand("down") }
+                        RemoteButton(Icons.Default.KeyboardArrowDown, "Down", repeatOnHold = true) { sendCommand("down") }
                     }
                 }
 
@@ -300,8 +305,36 @@ fun InfraredScreen(navController: NavController) {
 }
 
 @Composable
-private fun RemoteButton(icon: ImageVector, label: String, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(56.dp)) {
+private fun RemoteButton(
+    icon: ImageVector,
+    label: String,
+    repeatOnHold: Boolean = false,
+    onFire: () -> Unit
+) {
+    if (!repeatOnHold) {
+        IconButton(onClick = onFire, modifier = Modifier.size(56.dp)) {
+            Icon(icon, contentDescription = label, modifier = Modifier.size(28.dp))
+        }
+        return
+    }
+    // Répète la commande tant que le bouton est maintenu (volume, canal, flèches).
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    LaunchedEffect(isPressed) {
+        if (isPressed) {
+            onFire()
+            delay(400) // délai avant la répétition auto
+            while (true) {
+                onFire()
+                delay(180)
+            }
+        }
+    }
+    IconButton(
+        onClick = {},
+        interactionSource = interactionSource,
+        modifier = Modifier.size(56.dp)
+    ) {
         Icon(icon, contentDescription = label, modifier = Modifier.size(28.dp))
     }
 }

@@ -2,6 +2,7 @@ package com.example.flipperdroid
 
 import com.example.flipperdroid.flipper.FlipperNfc
 import com.example.flipperdroid.flipper.FlipperSub
+import com.example.flipperdroid.infrared.AcProtocols
 import com.example.flipperdroid.infrared.IrFile
 import com.example.flipperdroid.infrared.IrProtocols
 import com.example.flipperdroid.nfc.MifareClassicUtils
@@ -60,6 +61,55 @@ class LogicUnitTest {
     @Test
     fun ir_unknown_protocol_null() {
         assertEquals(null, IrProtocols.encode("BOGUS", 1, 2))
+    }
+
+    @Test
+    fun ir_sirc20_structure() {
+        val (freq, pattern) = IrProtocols.encode("SIRC20", 0x97, 0x25)!!
+        assertEquals(40000, freq)
+        assertEquals(42, pattern.size)   // header(2) + (7+5+8)=20 bits * 2
+        assertEquals(2400, pattern[0])
+        assertEquals(600, pattern[1])
+    }
+
+    @Test
+    fun ir_pioneer_uses_nec_structure() {
+        val (freq, pattern) = IrProtocols.encode("PIONEER", 0xA5, 0x1A)!!
+        assertEquals(40000, freq)
+        assertEquals(67, pattern.size)   // même structure que NEC
+        assertEquals(9000, pattern[0])
+    }
+
+    @Test
+    fun ir_rca_structure() {
+        val (freq, pattern) = IrProtocols.encode("RCA", 0x0F, 0xAB)!!
+        assertEquals(56000, freq)
+        assertEquals(51, pattern.size)   // header(2) + 24 bits * 2 + trailer(1)
+        assertEquals(4000, pattern[0])
+        assertEquals(4000, pattern[1])
+        assertEquals(500, pattern[pattern.size - 1])
+    }
+
+    @Test
+    fun ac_gree_frame_structure() {
+        val (freq, pattern) = AcProtocols.gree(
+            power = true, mode = AcProtocols.MODE_COOL, tempC = 22,
+            fan = AcProtocols.FAN_AUTO, swing = false
+        )
+        assertEquals(38000, freq)
+        // header(2) + 32b*2 + 3b*2 + sep(2) + 32b*2 + footer(2) = 140
+        assertEquals(140, pattern.size)
+        assertEquals(9000, pattern[0])
+        assertEquals(4500, pattern[1])
+    }
+
+    @Test
+    fun ac_gree_temp_is_clamped() {
+        // Deux températures hors bornes doivent produire des trames valides
+        val (_, hot) = AcProtocols.gree(true, AcProtocols.MODE_HEAT, 99, AcProtocols.FAN_HIGH, true)
+        val (_, cold) = AcProtocols.gree(true, AcProtocols.MODE_COOL, 0, AcProtocols.FAN_LOW, false)
+        assertEquals(140, hot.size)
+        assertEquals(140, cold.size)
     }
 
     // --- .ir file parsing ---

@@ -38,6 +38,9 @@ class IrRemoteViewModel(app: Application) : AndroidViewModel(app) {
 
     val hasEmitter: Boolean get() = irManager?.hasIrEmitter() == true
 
+    // Remotes importés en mémoire (nom -> contenu .ir), fusionnés aux assets.
+    private val importedTexts = mutableMapOf<String, String>()
+
     fun loadAssetList() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -52,6 +55,11 @@ class IrRemoteViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun loadRemote(assetName: String) {
+        val imported = importedTexts[assetName]
+        if (imported != null) {
+            loadFromText(assetName, imported)
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val text = getApplication<Application>().assets.open("infrared/$assetName")
@@ -64,6 +72,22 @@ class IrRemoteViewModel(app: Application) : AndroidViewModel(app) {
                 _status.value = "Error loading $assetName: ${e.message}"
             }
         }
+    }
+
+    /** Import en masse : ajoute tous les .ir d'un dossier à la liste des remotes. */
+    fun importFolder(files: List<Pair<String, String>>) {
+        var added = 0
+        for ((name, text) in files) {
+            if (IrFile.parse(text).isNotEmpty()) {
+                importedTexts[name] = text
+                added++
+            }
+        }
+        val merged = _remotes.value.toMutableSet()
+        merged.addAll(importedTexts.keys)
+        _remotes.value = merged.sorted()
+        _status.value = if (added == 0) "No valid .ir files found in folder"
+        else "Imported $added remote(s) from folder"
     }
 
     /** Charge un remote importé par l'utilisateur (contenu déjà lu depuis un Uri). */

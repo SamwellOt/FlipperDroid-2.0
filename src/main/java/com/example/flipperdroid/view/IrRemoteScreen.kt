@@ -1,5 +1,8 @@
 package com.example.flipperdroid.view
 
+import android.content.Context
+import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
@@ -11,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -60,6 +64,17 @@ fun IrRemoteScreen(
         }
     }
 
+    val folderLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri ->
+        if (treeUri != null) {
+            scope.launch {
+                val files = withContext(Dispatchers.IO) { readIrFolder(context, treeUri) }
+                viewModel.importFolder(files)
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -72,6 +87,9 @@ fun IrRemoteScreen(
                 actions = {
                     IconButton(onClick = { importLauncher.launch(arrayOf("*/*")) }) {
                         Icon(Icons.Default.FileOpen, contentDescription = "Import .ir")
+                    }
+                    IconButton(onClick = { folderLauncher.launch(null) }) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = "Import folder")
                     }
                     IconButton(onClick = { viewModel.powerSweep() }) {
                         Icon(Icons.Default.PowerSettingsNew, contentDescription = "Power sweep")
@@ -135,4 +153,35 @@ fun IrRemoteScreen(
             }
         }
     }
+}
+
+/** Lit tous les fichiers .ir d'un dossier choisi via le Storage Access Framework. */
+private fun readIrFolder(context: Context, treeUri: Uri): List<Pair<String, String>> {
+    val out = mutableListOf<Pair<String, String>>()
+    try {
+        val docId = DocumentsContract.getTreeDocumentId(treeUri)
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
+        context.contentResolver.query(
+            childrenUri,
+            arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME
+            ),
+            null, null, null
+        )?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val id = cursor.getString(0)
+                val name = cursor.getString(1) ?: continue
+                if (!name.endsWith(".ir", ignoreCase = true)) continue
+                val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, id)
+                val text = try {
+                    context.contentResolver.openInputStream(fileUri)?.bufferedReader()?.use { it.readText() }
+                } catch (e: Exception) { null }
+                if (text != null) out.add(name to text)
+            }
+        }
+    } catch (e: Exception) {
+        // dossier illisible : on renvoie ce qu'on a pu lire
+    }
+    return out
 }

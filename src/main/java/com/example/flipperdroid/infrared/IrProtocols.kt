@@ -16,10 +16,18 @@ object IrProtocols {
             "SAMSUNG32", "SAMSUNG" -> 38000 to samsung32(address and 0xFF, command and 0xFF)
             "SONY", "SIRC" -> 40000 to sirc(command and 0x7F, address and 0x1F, 5)
             "SIRC15" -> 40000 to sirc(command and 0x7F, address and 0xFF, 8)
+            // SIRC20 : 7 bits commande + 5 bits appareil + 8 bits étendus.
+            // Les 8 bits étendus sont pris dans les bits hauts de l'adresse.
+            "SIRC20" -> 40000 to sirc20(command and 0x7F, address and 0x1F, (address shr 5) and 0xFF)
             "RC5", "RC5X" -> 36000 to rc5(address and 0x1F, command and 0x3F)
             "JVC" -> 38000 to jvc(address and 0xFF, command and 0xFF)
             "APPLE", "APPLETV" -> 38000 to apple(command and 0xFF)
             "KASEIKYO", "PANASONIC" -> 37000 to kaseikyo(address, command)
+            // Pioneer utilise le format NEC (porteuse ~40 kHz).
+            "PIONEER" -> 40000 to nec(address and 0xFF, command and 0xFF)
+            // RCA : en-tête 4000/4000, 4 bits adresse + 8 bits commande puis leur
+            // complément, MSB d'abord, porteuse 56 kHz.
+            "RCA" -> 56000 to rca(address and 0x0F, command and 0xFF)
             "COOLIX", "AC" -> 38000 to coolix(command and 0xFFFFFF)
             else -> null
         }
@@ -127,6 +135,36 @@ object IrProtocols {
             out.add(600)
         }
         return out.toIntArray()
+    }
+
+    /** Sony SIRC 20 bits : 7 bits commande + 5 bits appareil + 8 bits étendus. */
+    private fun sirc20(cmd: Int, addr: Int, ext: Int): IntArray {
+        val out = ArrayList<Int>()
+        out.add(2400); out.add(600)
+        for (i in 0 until 7) { out.add(if ((cmd shr i) and 1 == 1) 1200 else 600); out.add(600) }
+        for (i in 0 until 5) { out.add(if ((addr shr i) and 1 == 1) 1200 else 600); out.add(600) }
+        for (i in 0 until 8) { out.add(if ((ext shr i) and 1 == 1) 1200 else 600); out.add(600) }
+        return out.toIntArray()
+    }
+
+    // --- RCA (en-tête 4000/4000, MSB d'abord, données + complément) ---
+
+    private fun rca(addr: Int, cmd: Int): IntArray {
+        val out = ArrayList<Int>()
+        out.add(4000); out.add(4000)
+        appendRca(out, addr and 0x0F, 4)
+        appendRca(out, cmd and 0xFF, 8)
+        appendRca(out, addr.inv() and 0x0F, 4)
+        appendRca(out, cmd.inv() and 0xFF, 8)
+        out.add(500) // mark final
+        return out.toIntArray()
+    }
+
+    private fun appendRca(out: ArrayList<Int>, value: Int, bits: Int) {
+        for (i in bits - 1 downTo 0) { // MSB d'abord
+            out.add(500)
+            out.add(if ((value shr i) and 1 == 1) 2000 else 1000)
+        }
     }
 
     // --- RC5 (Manchester) ---
