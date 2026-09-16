@@ -13,6 +13,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.flipperdroid.redteam.FuzzPayload
 import com.example.flipperdroid.redteam.FuzzPayloadLibrary
 import com.example.flipperdroid.util.AppLog
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -99,7 +101,7 @@ class BleGattFuzzerViewModel(private val context: Context) : ViewModel() {
     }
 
     private fun fuzzServices(gatt: BluetoothGatt) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             gatt.services.forEach { service ->
                 service.characteristics.forEach { characteristic ->
                     addLog("Fuzzing ${service.uuid} / ${characteristic.uuid}")
@@ -114,7 +116,7 @@ class BleGattFuzzerViewModel(private val context: Context) : ViewModel() {
                         } catch (e: Exception) {
                             addLog("Error fuzzing: ${e.message}")
                         }
-                        Thread.sleep(100)
+                        delay(100)
                     }
                 }
             }

@@ -17,6 +17,15 @@ data class PacketCapture(
 
 object PacketSniffer {
 
+    @Volatile
+    private var currentProcess: Process? = null
+
+    /** Stops any in-progress tcpdump capture started by [startTcpdump]. */
+    fun stop() {
+        currentProcess?.destroy()
+        currentProcess = null
+    }
+
     suspend fun startTcpdump(
         iface: String = "any",
         filter: String = "",
@@ -50,6 +59,7 @@ object PacketSniffer {
             }
 
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", commands.joinToString(" ")))
+            currentProcess = process
             val reader = BufferedReader(InputStreamReader(process.inputStream))
 
             var line: String?
@@ -71,23 +81,27 @@ object PacketSniffer {
             Result.success(output.toString())
         } catch (e: Exception) {
             Result.failure(e)
+        } finally {
+            currentProcess = null
         }
     }
 
-    fun getNetworkStats(): Result<Map<String, String>> = try {
-        val proc = Runtime.getRuntime().exec(arrayOf("netstat", "-an"))
-        val reader = BufferedReader(InputStreamReader(proc.inputStream))
+    suspend fun getNetworkStats(): Result<Map<String, String>> = withContext(Dispatchers.IO) {
+        try {
+            val proc = Runtime.getRuntime().exec(arrayOf("netstat", "-an"))
+            val reader = BufferedReader(InputStreamReader(proc.inputStream))
 
-        val stats = mutableMapOf<String, String>()
-        val lines = reader.readLines()
+            val stats = mutableMapOf<String, String>()
+            val lines = reader.readLines()
 
-        stats["tcp_connections"] = lines.count { it.contains("ESTABLISHED") }.toString()
-        stats["tcp_listening"] = lines.count { it.contains("LISTEN") }.toString()
-        stats["total_lines"] = lines.size.toString()
+            stats["tcp_connections"] = lines.count { it.contains("ESTABLISHED") }.toString()
+            stats["tcp_listening"] = lines.count { it.contains("LISTEN") }.toString()
+            stats["total_lines"] = lines.size.toString()
 
-        Result.success(stats)
-    } catch (e: Exception) {
-        Result.failure(e)
+            Result.success(stats)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     fun captureWithFilters(

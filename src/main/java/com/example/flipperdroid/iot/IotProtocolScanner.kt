@@ -90,6 +90,20 @@ object IotProtocolScanner {
                 socket.soTimeout = 2000
                 socket.connect(java.net.InetSocketAddress(ip, 1883), 2000)
 
+                // An MQTT broker stays silent until the client sends CONNECT,
+                // so send a minimal CONNECT (zero-length client id) first.
+                val output = socket.getOutputStream()
+                output.write(
+                    byteArrayOf(
+                        0x10.toByte(), 0x0c.toByte(),
+                        0x00.toByte(), 0x04.toByte(),
+                        0x4d.toByte(), 0x51.toByte(), 0x54.toByte(), 0x54.toByte(),
+                        0x04.toByte(), 0x02.toByte(), 0x00.toByte(), 0x00.toByte(),
+                        0x00.toByte(), 0x00.toByte()
+                    )
+                )
+                output.flush()
+
                 // Try to read MQTT CONNACK
                 val input = socket.getInputStream()
                 val buffer = ByteArray(4)
@@ -105,19 +119,19 @@ object IotProtocolScanner {
     private fun isCoapOpen(ip: String): Boolean {
         return try {
             val packet = byteArrayOf(0x40.toByte(), 0x01, 0x00, 0x00)
-            val socket = java.net.DatagramSocket()
-            socket.soTimeout = 2000
+            java.net.DatagramSocket().use { socket ->
+                socket.soTimeout = 2000
 
-            val address = java.net.InetAddress.getByName(ip)
-            val packet_out = java.net.DatagramPacket(packet, packet.size, address, 5683)
-            socket.send(packet_out)
+                val address = java.net.InetAddress.getByName(ip)
+                val packet_out = java.net.DatagramPacket(packet, packet.size, address, 5683)
+                socket.send(packet_out)
 
-            val buffer = ByteArray(128)
-            val packet_in = java.net.DatagramPacket(buffer, buffer.size)
-            socket.receive(packet_in)
+                val buffer = ByteArray(128)
+                val packet_in = java.net.DatagramPacket(buffer, buffer.size)
+                socket.receive(packet_in)
 
-            socket.close()
-            true
+                true
+            }
         } catch (e: Exception) {
             false
         }
@@ -136,7 +150,8 @@ object IotProtocolScanner {
                     0x10.toByte(), 0x0c.toByte(),
                     0x00.toByte(), 0x04.toByte(),
                     0x4d.toByte(), 0x51.toByte(), 0x54.toByte(), 0x54.toByte(),
-                    0x04.toByte(), 0x02.toByte(), 0x00.toByte(), 0x00
+                    0x04.toByte(), 0x02.toByte(), 0x00.toByte(), 0x00.toByte(),
+                    0x00.toByte(), 0x00.toByte() // zero-length client id
                 )
                 output.write(connect)
                 output.flush()
@@ -191,20 +206,20 @@ object IotProtocolScanner {
     private fun coapGet(ip: String, path: String): Boolean {
         return try {
             // Simplified CoAP GET
-            val socket = java.net.DatagramSocket()
-            socket.soTimeout = 2000
+            java.net.DatagramSocket().use { socket ->
+                socket.soTimeout = 2000
 
-            val packet = byteArrayOf(0x40.toByte(), 0x01, 0x00, 0x01) + path.toByteArray()
-            val address = java.net.InetAddress.getByName(ip)
-            val packet_out = java.net.DatagramPacket(packet, packet.size, address, 5683)
-            socket.send(packet_out)
+                val packet = byteArrayOf(0x40.toByte(), 0x01, 0x00, 0x01) + path.toByteArray()
+                val address = java.net.InetAddress.getByName(ip)
+                val packet_out = java.net.DatagramPacket(packet, packet.size, address, 5683)
+                socket.send(packet_out)
 
-            val buffer = ByteArray(256)
-            val packet_in = java.net.DatagramPacket(buffer, buffer.size)
-            socket.receive(packet_in)
+                val buffer = ByteArray(256)
+                val packet_in = java.net.DatagramPacket(buffer, buffer.size)
+                socket.receive(packet_in)
 
-            socket.close()
-            true
+                true
+            }
         } catch (e: Exception) {
             false
         }

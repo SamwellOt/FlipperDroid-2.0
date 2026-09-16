@@ -73,6 +73,7 @@ class PacketSnifferViewModel : ViewModel() {
 
     fun stopSniffing() {
         _isSniffing.value = false
+        PacketSniffer.stop()
         addLog("Sniffing stopped")
     }
 

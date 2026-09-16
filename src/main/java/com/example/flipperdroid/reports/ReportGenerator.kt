@@ -34,6 +34,29 @@ enum class Severity {
 
 object ReportGenerator {
 
+    private fun escapeHtml(value: String): String = value
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&#39;")
+
+    private fun escapeJson(value: String): String {
+        val sb = StringBuilder()
+        for (c in value) {
+            when (c) {
+                '\\' -> sb.append("\\\\")
+                '"' -> sb.append("\\\"")
+                '\n' -> sb.append("\\n")
+                '\r' -> sb.append("\\r")
+                '\t' -> sb.append("\\t")
+                '\b' -> sb.append("\\b")
+                else -> if (c < ' ') sb.append("\\u%04x".format(c.code)) else sb.append(c)
+            }
+        }
+        return sb.toString()
+    }
+
     fun generateMarkdownReport(report: PenetrationReport): String {
         val sb = StringBuilder()
 
@@ -57,7 +80,7 @@ object ReportGenerator {
 
         // Findings
         sb.append("## Findings\n\n")
-        report.findings.sortedByDescending { it.severity.ordinal }.forEach { finding ->
+        report.findings.sortedBy { it.severity.ordinal }.forEach { finding ->
             sb.append("### [${finding.severity}] ${finding.title}\n")
             sb.append("**ID:** ${finding.id}\n\n")
             sb.append("**Description:**\n${finding.description}\n\n")
@@ -103,7 +126,7 @@ object ReportGenerator {
             <html>
             <head>
                 <meta charset="UTF-8">
-                <title>${report.title}</title>
+                <title>${escapeHtml(report.title)}</title>
                 <style>
                     body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
                     .header { background: #2c3e50; color: white; padding: 20px; border-radius: 5px; }
@@ -124,9 +147,9 @@ object ReportGenerator {
             </head>
             <body>
                 <div class="header">
-                    <h1>${report.title}</h1>
+                    <h1>${escapeHtml(report.title)}</h1>
                     <p>Date: ${report.date.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))}</p>
-                    <p>Tester: ${report.tester} | Target: ${report.target}</p>
+                    <p>Tester: ${escapeHtml(report.tester)} | Target: ${escapeHtml(report.target)}</p>
                 </div>
         """.trimIndent())
 
@@ -150,21 +173,21 @@ object ReportGenerator {
 
         // Findings
         sb.append("<div class='section'><h2>Findings</h2>\n")
-        report.findings.sortedByDescending { it.severity.ordinal }.forEach { finding ->
+        report.findings.sortedBy { it.severity.ordinal }.forEach { finding ->
             sb.append("""
                 <div style="margin-top: 20px; padding: 15px; border-left: 4px solid #e74c3c;">
-                    <h3><span class='${finding.severity.name.lowercase()}'>${finding.severity.name}</span> - ${finding.title}</h3>
-                    <p><strong>ID:</strong> ${finding.id}</p>
-                    <p><strong>Description:</strong> ${finding.description}</p>
-                    <p><strong>Impact:</strong> ${finding.impact}</p>
+                    <h3><span class='${finding.severity.name.lowercase()}'>${finding.severity.name}</span> - ${escapeHtml(finding.title)}</h3>
+                    <p><strong>ID:</strong> ${escapeHtml(finding.id)}</p>
+                    <p><strong>Description:</strong> ${escapeHtml(finding.description)}</p>
+                    <p><strong>Impact:</strong> ${escapeHtml(finding.impact)}</p>
             """.trimIndent())
 
             if (finding.cvss > 0f) {
                 sb.append("<p><strong>CVSS Score:</strong> ${finding.cvss}</p>\n")
             }
 
-            sb.append("<p><strong>Remediation:</strong> ${finding.remediation}</p>\n")
-            sb.append("<pre>${finding.evidence}</pre>\n")
+            sb.append("<p><strong>Remediation:</strong> ${escapeHtml(finding.remediation)}</p>\n")
+            sb.append("<pre>${escapeHtml(finding.evidence)}</pre>\n")
             sb.append("</div>\n")
         }
 
@@ -178,7 +201,7 @@ object ReportGenerator {
                     <ul>
             """.trimIndent())
             report.recommendations.forEach { rec ->
-                sb.append("<li>$rec</li>\n")
+                sb.append("<li>${escapeHtml(rec)}</li>\n")
             }
             sb.append("</ul>\n</div>\n")
         }
@@ -192,21 +215,21 @@ object ReportGenerator {
         val sb = StringBuilder()
 
         sb.append("{\n")
-        sb.append("  \"title\": \"${report.title}\",\n")
-        sb.append("  \"date\": \"${report.date}\",\n")
-        sb.append("  \"tester\": \"${report.tester}\",\n")
-        sb.append("  \"target\": \"${report.target}\",\n")
+        sb.append("  \"title\": \"${escapeJson(report.title)}\",\n")
+        sb.append("  \"date\": \"${escapeJson(report.date.toString())}\",\n")
+        sb.append("  \"tester\": \"${escapeJson(report.tester)}\",\n")
+        sb.append("  \"target\": \"${escapeJson(report.target)}\",\n")
         sb.append("  \"findings\": [\n")
 
         report.findings.forEachIndexed { index, finding ->
             sb.append("    {\n")
-            sb.append("      \"id\": \"${finding.id}\",\n")
-            sb.append("      \"title\": \"${finding.title}\",\n")
-            sb.append("      \"severity\": \"${finding.severity.name}\",\n")
-            sb.append("      \"description\": \"${finding.description}\",\n")
-            sb.append("      \"impact\": \"${finding.impact}\",\n")
-            sb.append("      \"remediation\": \"${finding.remediation}\",\n")
-            sb.append("      \"evidence\": \"${finding.evidence}\",\n")
+            sb.append("      \"id\": \"${escapeJson(finding.id)}\",\n")
+            sb.append("      \"title\": \"${escapeJson(finding.title)}\",\n")
+            sb.append("      \"severity\": \"${escapeJson(finding.severity.name)}\",\n")
+            sb.append("      \"description\": \"${escapeJson(finding.description)}\",\n")
+            sb.append("      \"impact\": \"${escapeJson(finding.impact)}\",\n")
+            sb.append("      \"remediation\": \"${escapeJson(finding.remediation)}\",\n")
+            sb.append("      \"evidence\": \"${escapeJson(finding.evidence)}\",\n")
             sb.append("      \"cvss\": ${finding.cvss}\n")
             sb.append("    }")
             if (index < report.findings.size - 1) sb.append(",")
@@ -216,7 +239,7 @@ object ReportGenerator {
         sb.append("  ],\n")
         sb.append("  \"recommendations\": [\n")
         report.recommendations.forEachIndexed { index, rec ->
-            sb.append("    \"$rec\"")
+            sb.append("    \"${escapeJson(rec)}\"")
             if (index < report.recommendations.size - 1) sb.append(",")
             sb.append("\n")
         }

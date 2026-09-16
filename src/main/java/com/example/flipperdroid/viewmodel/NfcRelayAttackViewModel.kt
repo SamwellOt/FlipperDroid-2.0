@@ -6,9 +6,11 @@ import androidx.lifecycle.viewModelScope
 import com.example.flipperdroid.nfc.NfcRelayAttack
 import com.example.flipperdroid.nfc.RelayCapture
 import com.example.flipperdroid.util.AppLog
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -44,11 +46,13 @@ class NfcRelayAttackViewModel : androidx.lifecycle.ViewModel() {
             addLog("Starting NFC relay attack capture...")
 
             try {
-                val captures = NfcRelayAttack.captureAndRelay(
-                    tag,
-                    _relayAddress.value,
-                    _relayPort.value
-                )
+                val captures = withContext(Dispatchers.IO) {
+                    NfcRelayAttack.captureAndRelay(
+                        tag,
+                        _relayAddress.value,
+                        _relayPort.value
+                    )
+                }
 
                 _capturedData.value = captures
                 addLog("Captured ${captures.size} APDU exchanges")
@@ -68,7 +72,9 @@ class NfcRelayAttackViewModel : androidx.lifecycle.ViewModel() {
     fun replayCapture(tag: Tag, capture: RelayCapture) {
         viewModelScope.launch {
             try {
-                val response = NfcRelayAttack.replayCapture(tag, capture)
+                val response = withContext(Dispatchers.IO) {
+                    NfcRelayAttack.replayCapture(tag, capture)
+                }
                 if (response != null) {
                     addLog("Replayed: ${capture.description} -> ${response.size} bytes")
                 } else {
