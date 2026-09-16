@@ -29,10 +29,18 @@ val FlipperLightError = Color(0xFFFF8A80)
 val FlipperWarning = Color(0xFFFFEB3B)
 val FlipperInfo = Color(0xFF2196F3)
 
-// Couleurs d'arrière-plan sombre
-val FlipperBackground = FlipperBlack
-val FlipperSurface = FlipperDarkGray
-val FlipperCardBackground = FlipperGray
+// Couleurs d'arrière-plan sombre — palette raffinée : fond quasi-noir puis
+// surfaces "élevées" de plus en plus claires (donne de la profondeur, évite
+// le gris délavé 0x808080 des cartes sur fond noir pur).
+val FlipperNearBlack = Color(0xFF0D0D0F)      // fond de l'app
+val FlipperSurfaceDark = Color(0xFF17171A)    // surface de base (barres, feuilles)
+val FlipperCardDark = Color(0xFF212127)       // cartes / tuiles
+val FlipperOutlineDark = Color(0xFF33333A)    // bordures discrètes
+val FlipperOnSurfaceMuted = Color(0xFFB9B9C3) // texte secondaire lisible
+
+val FlipperBackground = FlipperNearBlack
+val FlipperSurface = FlipperSurfaceDark
+val FlipperCardBackground = FlipperCardDark
 
 // Couleurs d'arrière-plan clair
 val FlipperLightBackground = Color(0xFFF5F5F5)
