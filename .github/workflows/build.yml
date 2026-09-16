@@ -28,6 +28,10 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Explicit list without the obsolete 'tools' package, whose default
+          # inclusion makes sdkmanager fail ("Failed to find package 'tools'").
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
