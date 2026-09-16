@@ -82,12 +82,14 @@ class IrRemoteViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         val (freq, pattern) = signal
-        try {
-            irManager?.transmit(freq, pattern)
-            _status.value = "Sent '${button.name}' (${freq / 1000} kHz)"
-            com.example.flipperdroid.util.AppLog.log("IR", "Sent '${button.name}' via ${button.protocol ?: button.type}")
-        } catch (e: Exception) {
-            _status.value = "Transmit failed: ${e.message}"
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                irManager?.transmit(freq, pattern)
+                _status.value = "Sent '${button.name}' (${freq / 1000} kHz)"
+                com.example.flipperdroid.util.AppLog.log("IR", "Sent '${button.name}' via ${button.protocol ?: button.type}")
+            } catch (e: Exception) {
+                _status.value = "Transmit failed: ${e.message}"
+            }
         }
     }
 

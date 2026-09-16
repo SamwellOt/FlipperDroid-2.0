@@ -141,7 +141,7 @@ fun HomeScreen(
         FeatureItem("Skimmer Detector", Icons.Default.CreditCardOff, "skimmer",
             "Scan Bluetooth/BLE for cheap serial modules (HC-05/06, JDY…) often used in card skimmers. Heuristic hint, not proof."),
         FeatureItem("Infrared", Icons.Default.SettingsRemote, "ir",
-            "Simple universal IR remote (NEC) for TV, AC, audio and projector. Requires an IR emitter."),
+            "Universal IR remote with per-brand protocols (Samsung, LG, Sony, Panasonic, Philips…). Requires an IR emitter."),
         FeatureItem("IR Remotes", Icons.Default.Tv, "ir_remotes",
             "Play Flipper .ir remotes from a code database, import your own, and run a TV-B-Gone style power sweep."),
         FeatureItem("QR Scanner", Icons.Default.QrCodeScanner, "qr",
