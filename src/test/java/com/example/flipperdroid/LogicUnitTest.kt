@@ -163,7 +163,10 @@ class LogicUnitTest {
     fun wifi_frequency_to_channel() {
         assertEquals(1, WifiNetwork.frequencyToChannel(2412))
         assertEquals(6, WifiNetwork.frequencyToChannel(2437))
+        assertEquals(13, WifiNetwork.frequencyToChannel(2472))
+        assertEquals(14, WifiNetwork.frequencyToChannel(2484)) // cas particulier Japon
         assertEquals(36, WifiNetwork.frequencyToChannel(5180))
+        assertEquals(165, WifiNetwork.frequencyToChannel(5825))
     }
 
     // --- Skimmer heuristic ---

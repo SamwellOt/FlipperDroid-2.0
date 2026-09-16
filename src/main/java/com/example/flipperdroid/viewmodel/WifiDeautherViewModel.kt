@@ -62,8 +62,11 @@ data class WifiNetwork(
 
         fun frequencyToChannel(frequency: Int): Int {
             return when {
-                frequency >= 2412 && frequency <= 2484 -> (frequency - 2412) / 5 + 1
-                frequency >= 5170 && frequency <= 5825 -> (frequency - 5170) / 5 + 34
+                // Canal 14 (Japon) est un cas particulier : 2484 MHz, hors de la
+                // grille régulière espacée de 5 MHz (2412..2472 = canaux 1..13).
+                frequency == 2484 -> 14
+                frequency in 2412..2472 -> (frequency - 2412) / 5 + 1
+                frequency in 5170..5825 -> (frequency - 5170) / 5 + 34
                 else -> 0
             }
         }
