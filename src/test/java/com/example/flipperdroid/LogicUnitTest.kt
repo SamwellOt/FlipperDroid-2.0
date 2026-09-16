@@ -91,6 +91,60 @@ class LogicUnitTest {
     }
 
     @Test
+    fun ir_rc6_structure() {
+        val (freq, pattern) = IrProtocols.encode("RC6", 0x00, 0x0C)!!
+        assertEquals(36000, freq)
+        assertEquals(2664, pattern[0])   // en-tête mark = 6T (T=444)
+        assertTrue(pattern.size > 20)
+    }
+
+    @Test
+    fun ir_rc5x_extends_command() {
+        // RC5X doit encoder une commande 7 bits (0..127) sans planter.
+        val (freq, pattern) = IrProtocols.encode("RC5X", 0x05, 0x50)!!
+        assertEquals(36000, freq)
+        assertTrue(pattern.isNotEmpty())
+    }
+
+    @Test
+    fun ir_denon_sharp_15bits() {
+        val (fd, denon) = IrProtocols.encode("DENON", 0x02, 0x40)!!
+        assertEquals(38000, fd)
+        assertEquals(31, denon.size)     // pas d'en-tête : 15 bits * 2 + trailer(1)
+        assertEquals(264, denon[0])
+        val (fs, sharp) = IrProtocols.encode("SHARP", 0x02, 0x40)!!
+        assertEquals(38000, fs)
+        assertEquals(31, sharp.size)
+        assertEquals(320, sharp[0])
+    }
+
+    @Test
+    fun ir_mitsubishi_structure() {
+        val (freq, pattern) = IrProtocols.encode("MITSUBISHI", 0x23, 0xCB)!!
+        assertEquals(33000, freq)
+        assertEquals(33, pattern.size)   // 16 bits * 2 + trailer(1)
+        assertEquals(300, pattern[0])
+    }
+
+    @Test
+    fun ir_sanyo_lc7461_structure() {
+        val (freq, pattern) = IrProtocols.encode("SANYO", 0x1AB2, 0x1C)!!
+        assertEquals(38000, freq)
+        assertEquals(87, pattern.size)   // header(2) + 42 bits * 2 + trailer(1)
+        assertEquals(9000, pattern[0])
+        assertEquals(4500, pattern[1])
+    }
+
+    @Test
+    fun ir_rcmm_structure() {
+        val (freq, pattern) = IrProtocols.encode("RCMM", 0x1234, 0x56)!!
+        assertEquals(36000, freq)
+        assertEquals(27, pattern.size)   // header(2) + 12 symboles * 2 + trailer(1)
+        assertEquals(416, pattern[0])
+        assertEquals(277, pattern[1])
+    }
+
+    @Test
     fun ac_gree_frame_structure() {
         val (freq, pattern) = AcProtocols.gree(
             power = true, mode = AcProtocols.MODE_COOL, tempC = 22,
