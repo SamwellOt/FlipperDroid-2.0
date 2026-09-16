@@ -185,7 +185,7 @@ fun HomeScreen(
         FeatureItem("IR Tools", Icons.Default.FlashOn, "ir_tools", "Infrared",
             "TV-B-Gone power-code blaster and command brute-forcer for mapping unknown remotes. Authorized testing only."),
         FeatureItem("AC Control", Icons.Default.AcUnit, "ac_control", "Infrared",
-            "Full-state air-conditioner remote (Gree): power, mode, temperature, fan and swing in one frame."),
+            "Full-state air-conditioner remote: power, mode, temperature, fan and swing in one frame. Brands: Gree (verified) + Coolix, LG, Midea, Samsung, Fujitsu, Kelvinator, Haier, Daikin, Mitsubishi, Panasonic (reference — verify on your unit)."),
 
         // --- Tools & Utilities ---
         FeatureItem("QR Scanner", Icons.Default.QrCodeScanner, "qr", "Tools & Utilities",

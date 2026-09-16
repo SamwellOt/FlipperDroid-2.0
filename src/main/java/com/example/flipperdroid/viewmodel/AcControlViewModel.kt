@@ -13,8 +13,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 /**
- * Contrôle de climatiseur à état complet (Gree pour l'instant). Émet toute la
+ * Contrôle de climatiseur à état complet (multi-marques). Émet toute la
  * configuration (marche, mode, température, ventilation, oscillation) en une trame.
+ * Sauf Gree, les encodages sont des portages de référence à vérifier sur l'appareil.
  */
 class AcControlViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -26,13 +27,13 @@ class AcControlViewModel(app: Application) : AndroidViewModel(app) {
     private val _status = MutableStateFlow("")
     val status: StateFlow<String> = _status
 
-    fun sendGree(power: Boolean, mode: Int, tempC: Int, fan: Int, swing: Boolean) {
+    fun send(brand: AcProtocols.Brand, power: Boolean, mode: Int, tempC: Int, fan: Int, swing: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
-            val (freq, pattern) = AcProtocols.gree(power, mode, tempC, fan, swing)
+            val (freq, pattern) = AcProtocols.encode(brand, power, mode, tempC, fan, swing)
             try {
                 irManager?.transmit(freq, pattern)
-                _status.value = "Gree sent: ${if (power) "ON" else "OFF"}, ${tempC}°C, mode=$mode, fan=$fan"
-                AppLog.log("AC", "Gree state power=$power mode=$mode temp=$tempC fan=$fan swing=$swing")
+                _status.value = "${brand.name} sent: ${if (power) "ON" else "OFF"}, ${tempC}°C, mode=$mode, fan=$fan"
+                AppLog.log("AC", "${brand.name} power=$power mode=$mode temp=$tempC fan=$fan swing=$swing")
             } catch (e: Exception) {
                 _status.value = "Transmit failed: ${e.message}"
             }

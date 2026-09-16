@@ -5,6 +5,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,6 +24,8 @@ fun AcControlScreen(
 ) {
     val status by viewModel.status.collectAsState()
 
+    var brand by remember { mutableStateOf(AcProtocols.Brand.GREE) }
+    var brandMenu by remember { mutableStateOf(false) }
     var power by remember { mutableStateOf(true) }
     var mode by remember { mutableStateOf(AcProtocols.MODE_COOL) }
     var temp by remember { mutableStateOf(22f) }
@@ -43,12 +46,12 @@ fun AcControlScreen(
         "High" to AcProtocols.FAN_HIGH
     )
 
-    fun send() = viewModel.sendGree(power, mode, temp.toInt(), fan, swing)
+    fun send() = viewModel.send(brand, power, mode, temp.toInt(), fan, swing)
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("AC Control (Gree)") },
+                title = { Text("AC Control") },
                 navigationIcon = {
                     IconButton(onClick = { navController.navigateUp() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -73,6 +76,35 @@ fun AcControlScreen(
                 Spacer(Modifier.height(12.dp))
             }
 
+            // Sélecteur de marque.
+            Text("Brand", style = MaterialTheme.typography.labelLarge)
+            Spacer(Modifier.height(4.dp))
+            Box {
+                OutlinedButton(onClick = { brandMenu = true }) {
+                    Text(brand.name)
+                    Spacer(Modifier.width(6.dp))
+                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                }
+                DropdownMenu(expanded = brandMenu, onDismissRequest = { brandMenu = false }) {
+                    AcProtocols.Brand.values().forEach { b ->
+                        DropdownMenuItem(
+                            text = { Text(b.name) },
+                            onClick = { brand = b; brandMenu = false }
+                        )
+                    }
+                }
+            }
+
+            if (brand != AcProtocols.Brand.GREE) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "⚠ Reference encoding — not verified on hardware. Field maps (mode/fan/temp) may differ on your unit.",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Text("Power", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.width(12.dp))
