@@ -18,6 +18,31 @@ data class IrButton(
             else -> null
         }
     }
+
+    /**
+     * Rafale répétée (une pression fiable) pour le TV-B-Gone. Pour un bouton "parsed",
+     * délègue à IrProtocols.encodePowerBurst ; pour un bouton "raw", répète simplement
+     * la capture [presses] fois (une trame brute isolée est souvent ignorée).
+     */
+    fun toBurst(presses: Int = 0): Pair<Int, IntArray>? {
+        return when (type.lowercase()) {
+            "parsed" -> protocol?.let {
+                IrProtocols.encodePowerBurst(it, address, command, presses)
+            }
+            "raw" -> {
+                val data = rawData ?: return null
+                if (data.isEmpty()) return null
+                val count = if (presses > 0) presses else 3
+                val out = ArrayList<Int>(data.size * count + count)
+                repeat(count) { i ->
+                    if (i > 0) out.add(40000)   // espace inter-trame
+                    for (v in data) out.add(v)
+                }
+                frequency to out.toIntArray()
+            }
+            else -> null
+        }
+    }
 }
 
 /**

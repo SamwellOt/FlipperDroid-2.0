@@ -69,8 +69,17 @@ fun IrToolsScreen(
                     Spacer(Modifier.height(4.dp))
                     Text(
                         "Fire every known power code in sequence to switch off any TV, " +
-                            "projector or digital display in range.",
+                            "projector or digital display in range. Each code is sent as a " +
+                            "repeated burst (like a held remote button) so the receiver " +
+                            "actually registers it — a single frame is filtered as noise.",
                         style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Point the phone's IR emitter straight at the TV, ≤ 5 m, and hold " +
+                            "steady until the sweep finishes.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(12.dp))
                     Button(
@@ -83,13 +92,13 @@ fun IrToolsScreen(
                         Text("Fire all power codes")
                     }
                     Spacer(Modifier.height(4.dp))
-                    OutlinedButton(
-                        onClick = { viewModel.tvBGone(rounds = 3) },
-                        enabled = !running,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Fire 3× (stubborn displays)")
-                    }
+                    Text(
+                        "Power is a toggle: run the sweep once. If a display is still on, " +
+                            "re-aim and fire again — running it back-to-back can toggle a set " +
+                            "you just switched off back on.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 

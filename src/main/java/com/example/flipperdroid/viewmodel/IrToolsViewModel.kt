@@ -40,14 +40,25 @@ class IrToolsViewModel(app: Application) : AndroidViewModel(app) {
 
     private var job: Job? = null
 
-    /** Émet tous les codes power connus (fichiers .ir empaquetés + liste curée). */
+    /**
+     * Émet tous les codes power connus (fichiers .ir empaquetés + liste curée).
+     *
+     * Chaque code est envoyé comme une **rafale répétée** (IrProtocols.encodePowerBurst) :
+     * une trame isolée est filtrée comme du bruit par la plupart des TV, et Sony exige
+     * 3 répétitions. Les codes en double (ex. LG présent dans LG_TV.ir ET dans la liste
+     * curée) sont **dédupliqués** : "power" étant une bascule, émettre deux fois le même
+     * code rallumerait la TV qu'on vient d'éteindre.
+     *
+     * @param rounds nombre de passes. 1 par défaut (une bascule = extinction). Ne PAS
+     *   augmenter sans raison : chaque passe supplémentaire rebascule chaque appareil.
+     */
     fun tvBGone(rounds: Int = 1) {
         if (_running.value) return
         job = viewModelScope.launch(Dispatchers.IO) {
             _running.value = true
             try {
                 val codes = collectPowerSignals()
-                _progress.value = "TV-B-Gone: ${codes.size} codes chargés"
+                _progress.value = "TV-B-Gone: ${codes.size} codes uniques chargés"
                 var sent = 0
                 repeat(rounds) {
                     for ((label, signal) in codes) {
@@ -57,20 +68,35 @@ class IrToolsViewModel(app: Application) : AndroidViewModel(app) {
                             irManager?.transmit(freq, pattern)
                             sent++
                         } catch (_: Exception) {}
-                        _progress.value = "Envoyé $sent — $label"
-                        delay(120)
+                        _progress.value = "Envoyé $sent/${codes.size} — $label"
+                        // Laisse le temps au récepteur de traiter la pression avant la suivante.
+                        delay(200)
                     }
                 }
-                _progress.value = "TV-B-Gone terminé : $sent émissions"
-                AppLog.log("IRTools", "TV-B-Gone fired $sent codes")
+                _progress.value = "TV-B-Gone terminé : $sent émissions (${codes.size} codes uniques)"
+                AppLog.log("IRTools", "TV-B-Gone fired $sent bursts (${codes.size} unique codes)")
             } finally {
                 _running.value = false
             }
         }
     }
 
+    /**
+     * Rassemble les signaux power à émettre, **dédupliqués** sur le contenu de la trame
+     * de base (pour qu'un même code présent dans un .ir et dans la liste curée ne soit
+     * pas émis deux fois → pas de rebascule). Chaque entrée est déjà une rafale prête.
+     */
     private fun collectPowerSignals(): List<Pair<String, Pair<Int, IntArray>>> {
         val out = mutableListOf<Pair<String, Pair<Int, IntArray>>>()
+        val seen = HashSet<String>()
+
+        // Clé d'unicité : la trame de base (fréquence + motif), indépendante du nb de répétitions.
+        fun addUnique(label: String, base: Pair<Int, IntArray>?, burst: Pair<Int, IntArray>?) {
+            if (base == null || burst == null) return
+            val key = "${base.first}:${base.second.joinToString(",")}"
+            if (seen.add(key)) out.add(label to burst)
+        }
+
         try {
             val assets = getApplication<Application>().assets
             val files = assets.list("infrared")?.filter { it.endsWith(".ir") } ?: emptyList()
@@ -83,12 +109,13 @@ class IrToolsViewModel(app: Application) : AndroidViewModel(app) {
                             it.name.equals("off", true)
                     }
                     .forEach { b ->
-                        b.toSignal()?.let { out.add("${file.removeSuffix(".ir")}/${b.name}" to it) }
+                        addUnique("${file.removeSuffix(".ir")}/${b.name}", b.toSignal(), b.toBurst())
                     }
             }
         } catch (_: Exception) {}
+
         for (pc in PowerCodes.EXTRA) {
-            pc.toSignal()?.let { out.add(pc.brand to it) }
+            addUnique(pc.brand, pc.toSignal(), pc.toBurst())
         }
         return out
     }

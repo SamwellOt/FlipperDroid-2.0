@@ -48,6 +48,56 @@ object IrProtocols {
         }
     }
 
+    /**
+     * Construit une **rafale** fiable représentant une seule pression : la trame
+     * complète répétée [presses] fois dans UN SEUL transmit(), avec l'intervalle
+     * propre au protocole.
+     *
+     * Pourquoi c'est indispensable pour que le TV-B-Gone fonctionne réellement :
+     * une trame IR **isolée** est presque toujours filtrée comme du bruit par les
+     * téléviseurs (LG, Samsung…), et le protocole **Sony SIRC impose au minimum 3
+     * répétitions** — une seule trame ne fait jamais rien. Une vraie télécommande
+     * répète la trame tant que le bouton est maintenu ; on reproduit ce
+     * comportement. Émettre toutes les répétitions **d'un bloc** (une seule pression
+     * logique) évite en plus le double-basculement (marche→arrêt) d'une commande
+     * "power" à bascule, contrairement à des transmit() séparés espacés dans le temps.
+     *
+     * @param presses nombre de trames (0 = valeur par défaut adaptée au protocole).
+     * @return (fréquence Hz, motif µs) ou null si protocole inconnu.
+     */
+    fun encodePowerBurst(
+        protocol: String,
+        address: Int,
+        command: Int,
+        presses: Int = 0
+    ): Pair<Int, IntArray>? {
+        val base = encode(protocol, address, command) ?: return null
+        val (freq, frame) = base
+        val p = protocol.uppercase().replace("_", "")
+        // Élément de répétition + intervalle inter-trame + nombre de trames.
+        val (repeatFrame, gapUs, defaultCount) = when {
+            // Sony : période 45 ms, minimum 3 trames complètes (exigence du protocole).
+            p.startsWith("SIRC") || p == "SONY" -> Triple(frame, 24000, 3)
+            // Famille NEC : "bouton maintenu" = code de répétition NEC (9000/2250/560).
+            p == "NEC" || p == "NECEXT" || p == "APPLE" || p == "APPLETV" ||
+                p == "PIONEER" || p.startsWith("SANYO") ->
+                Triple(NEC_REPEAT, 40000, 3)
+            // Samsung, RC5/RC6, Kaseikyo, etc. : on répète la trame complète.
+            else -> Triple(frame, 40000, 3)
+        }
+        val count = if (presses > 0) presses else defaultCount
+        val out = ArrayList<Int>(frame.size + (count - 1) * (repeatFrame.size + 1))
+        for (v in frame) out.add(v)
+        repeat(count - 1) {
+            out.add(gapUs)                 // espace inter-trame (le motif reprend par un mark)
+            for (v in repeatFrame) out.add(v)
+        }
+        return freq to out.toIntArray()
+    }
+
+    /** Code de répétition NEC : en-tête 9000/2250 puis mark final 560 (bouton maintenu). */
+    private val NEC_REPEAT = intArrayOf(9000, 2250, 560)
+
     // --- Pulse-distance (NEC / Samsung) ---
 
     private fun nec(addr: Int, cmd: Int): IntArray {

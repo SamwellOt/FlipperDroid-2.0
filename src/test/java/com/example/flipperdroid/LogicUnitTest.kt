@@ -144,6 +144,46 @@ class LogicUnitTest {
         assertEquals(277, pattern[1])
     }
 
+    // --- TV-B-Gone : rafales répétées (fiabilité réelle) ---
+    @Test
+    fun ir_burst_nec_uses_repeat_codes() {
+        // La rafale NEC = trame complète (67) + 2 codes de répétition NEC (gap + 9000/2250/560).
+        val (_, base) = IrProtocols.encode("NEC", 0x04, 0x08)!!
+        val (freq, burst) = IrProtocols.encodePowerBurst("NEC", 0x04, 0x08)!!
+        assertEquals(38000, freq)
+        assertEquals(67 + 2 * (1 + 3), burst.size)   // 3 trames, 2 répétitions de 3 valeurs
+        // Les premières valeurs sont exactement la trame de base.
+        for (i in base.indices) assertEquals(base[i], burst[i])
+        // Le code de répétition NEC apparaît après le premier espace inter-trame.
+        assertEquals(9000, burst[68])
+        assertEquals(2250, burst[69])
+        assertEquals(560, burst[70])
+    }
+
+    @Test
+    fun ir_burst_sony_repeats_full_frame_at_least_3x() {
+        // Sony SIRC DOIT être émis >=3 fois ; la rafale répète la trame complète.
+        val (_, base) = IrProtocols.encode("SIRC", 0x01, 0x15)!!
+        val (freq, burst) = IrProtocols.encodePowerBurst("SIRC", 0x01, 0x15)!!
+        assertEquals(40000, freq)
+        assertEquals(base.size + 2 * (1 + base.size), burst.size)   // 3 trames complètes
+        for (i in base.indices) assertEquals(base[i], burst[i])
+    }
+
+    @Test
+    fun ir_burst_respects_presses_override() {
+        val (_, base) = IrProtocols.encode("NEC", 0x04, 0x08)!!
+        val (_, once) = IrProtocols.encodePowerBurst("NEC", 0x04, 0x08, presses = 1)!!
+        assertEquals(base.size, once.size)   // une seule trame
+        val (_, five) = IrProtocols.encodePowerBurst("NEC", 0x04, 0x08, presses = 5)!!
+        assertEquals(base.size + 4 * (1 + 3), five.size)
+    }
+
+    @Test
+    fun ir_burst_unknown_protocol_null() {
+        assertEquals(null, IrProtocols.encodePowerBurst("BOGUS", 1, 2))
+    }
+
     @Test
     fun ac_gree_frame_structure() {
         val (freq, pattern) = AcProtocols.gree(
