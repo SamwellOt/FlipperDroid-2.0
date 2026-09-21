@@ -19,7 +19,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.example.flipperdroid.viewmodel.IrToolsViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun IrToolsScreen(
     navController: NavController,
@@ -99,6 +99,43 @@ fun IrToolsScreen(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // --- Cible précise (une marque à la fois) ---
+            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Target one brand", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "More reliable than the full sweep: pick your TV's brand, aim the " +
+                            "phone's IR emitter carefully, and tap once. It fires just that " +
+                            "power code as a firm held burst — no waiting for the right code " +
+                            "to scroll past. Nothing happened? Re-aim and tap again.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        viewModel.powerBrands.forEach { pc ->
+                            AssistChip(
+                                onClick = { viewModel.fireBrand(pc) },
+                                enabled = !running,
+                                label = { Text(pc.brand) },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.PowerSettingsNew,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            )
+                        }
+                    }
                 }
             }
 

@@ -120,6 +120,37 @@ class IrToolsViewModel(app: Application) : AndroidViewModel(app) {
         return out
     }
 
+    /** Codes power ciblables un par un — mode précis : on vise un appareil, on tire une fois. */
+    val powerBrands: List<PowerCode> = PowerCodes.EXTRA
+
+    /**
+     * Émet UN seul code power, en rafale "maintenue" robuste (presses élevé), pour viser
+     * un appareil précis au lieu de balayer toute la liste. "Power" étant une bascule, un
+     * appui = un basculement : si rien ne se passe, re-viser et re-tirer (ne pas marteler
+     * en boucle, ce qui rallumerait un appareil qu'on vient d'éteindre).
+     */
+    fun fireBrand(pc: PowerCode) {
+        if (_running.value) return
+        job = viewModelScope.launch(Dispatchers.IO) {
+            _running.value = true
+            try {
+                val burst = pc.toBurst(presses = 6)
+                if (burst == null) {
+                    _progress.value = "Code ${pc.brand} non encodable"
+                    return@launch
+                }
+                val (freq, pattern) = burst
+                try {
+                    irManager?.transmit(freq, pattern)
+                } catch (_: Exception) {}
+                _progress.value = "Émis : ${pc.brand} (power). Rien ? Vise mieux et re-tape."
+                AppLog.log("IRTools", "Fired targeted power code ${pc.brand}")
+            } finally {
+                _running.value = false
+            }
+        }
+    }
+
     /** Balaye les commandes [start]..[end] pour (protocole, adresse). */
     fun bruteForce(protocol: String, address: Int, start: Int, end: Int, delayMs: Long) {
         if (_running.value) return
