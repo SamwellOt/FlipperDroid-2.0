@@ -7,6 +7,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.flipperdroid.infrared.IrFile
 import com.example.flipperdroid.infrared.IrProtocols
+import com.example.flipperdroid.infrared.PowerCode
 import com.example.flipperdroid.infrared.PowerCodes
 import com.example.flipperdroid.util.AppLog
 import kotlinx.coroutines.Dispatchers
