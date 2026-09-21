@@ -367,6 +367,9 @@ class MainActivity : ComponentActivity() {
             composable("iot_scanner") {
                 IotProtocolScannerScreen(navController = navController)
             }
+            composable("ip_cameras") {
+                IpCameraScreen(navController = navController)
+            }
             composable("report_generator") {
                 ReportGeneratorScreen(navController = navController)
             }

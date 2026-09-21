@@ -1,5 +1,6 @@
 package com.example.flipperdroid
 
+import com.example.flipperdroid.camera.OnvifTools
 import com.example.flipperdroid.flipper.FlipperNfc
 import com.example.flipperdroid.flipper.FlipperSub
 import com.example.flipperdroid.infrared.AcProtocols
@@ -307,6 +308,129 @@ class LogicUnitTest {
         assertEquals("Mifare Classic", card.deviceType)
         assertEquals("04 A2 B3 C4", card.uid)
         assertEquals(1, card.blocks.size)
+    }
+
+    // --- ONVIF / IP cameras (noyau logique pur) ---
+    @Test
+    fun onvif_ws_discovery_probe_targets_cameras() {
+        val probe = OnvifTools.wsDiscoveryProbe("uuid:1234")
+        assertTrue(probe.contains("NetworkVideoTransmitter"))
+        assertTrue(probe.contains("ws/2005/04/discovery/Probe"))
+        assertTrue(probe.contains("uuid:1234"))
+    }
+
+    @Test
+    fun onvif_parse_xaddrs() {
+        val xml = """
+            <e:Envelope><e:Body><d:ProbeMatches><d:ProbeMatch>
+            <d:XAddrs>http://192.168.1.64/onvif/device_service http://[fe80::1]/onvif/device_service</d:XAddrs>
+            </d:ProbeMatch></d:ProbeMatches></e:Body></e:Envelope>
+        """.trimIndent()
+        val urls = OnvifTools.parseXAddrs(xml)
+        assertEquals(2, urls.size)
+        assertEquals("http://192.168.1.64/onvif/device_service", urls[0])
+    }
+
+    @Test
+    fun onvif_port_heuristic() {
+        assertTrue(OnvifTools.classifyCameraPorts(listOf(80, 554, 8000)).isLikelyCamera)
+        assertEquals("Dahua/XM (DVR)", OnvifTools.classifyCameraPorts(listOf(80, 37777)).vendorHint)
+        assertFalse(OnvifTools.classifyCameraPorts(listOf(22, 443)).isLikelyCamera)
+        assertFalse(OnvifTools.classifyCameraPorts(emptyList()).isLikelyCamera)
+    }
+
+    @Test
+    fun onvif_rtsp_auth_parsing() {
+        val resp = "RTSP/1.0 401 Unauthorized\r\nCSeq: 1\r\n" +
+            "WWW-Authenticate: Digest realm=\"IP Camera\", nonce=\"abc\"\r\n\r\n"
+        val a = OnvifTools.parseRtspAuth(resp)
+        assertEquals(401, a.status)
+        assertTrue(a.needsAuth)
+        assertEquals("Digest", a.scheme)
+        assertEquals("IP Camera", a.realm)
+        // Flux ouvert
+        val ok = OnvifTools.parseRtspAuth("RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n")
+        assertFalse(ok.needsAuth)
+    }
+
+    @Test
+    fun onvif_base64_matches_jdk() {
+        val data = "FlipperDroid".toByteArray()
+        assertEquals(java.util.Base64.getEncoder().encodeToString(data), OnvifTools.base64(data))
+        // Cas de padding
+        assertEquals("TQ==", OnvifTools.base64("M".toByteArray()))
+        assertEquals("TWE=", OnvifTools.base64("Ma".toByteArray()))
+    }
+
+    @Test
+    fun onvif_password_digest_vector() {
+        // Base64(SHA1(nonce + created + password)), vérifié contre un calcul JDK indépendant.
+        val nonce = byteArrayOf(0, 1, 2, 3, 4, 5, 6, 7)
+        val created = "2010-09-16T07:50:45Z"
+        val password = "userpassword"
+        val md = java.security.MessageDigest.getInstance("SHA-1")
+        md.update(nonce); md.update(created.toByteArray()); md.update(password.toByteArray())
+        val expected = java.util.Base64.getEncoder().encodeToString(md.digest())
+        assertEquals(expected, OnvifTools.passwordDigest(nonce, created, password))
+    }
+
+    @Test
+    fun onvif_security_header_structure() {
+        val header = OnvifTools.securityHeader("admin", "pass", byteArrayOf(1, 2, 3, 4), "2026-09-21T10:00:00Z")
+        assertTrue(header.contains("<Username>admin</Username>"))
+        assertTrue(header.contains("PasswordDigest"))
+        assertTrue(header.contains("<Created"))
+        assertTrue(header.contains("2026-09-21T10:00:00Z"))
+    }
+
+    @Test
+    fun onvif_ptz_continuous_move_clamps_and_formats() {
+        val body = OnvifTools.continuousMoveBody("Profile_1", 2.0f, -0.5f, 0.0f)
+        assertTrue(body.contains("<ProfileToken>Profile_1</ProfileToken>"))
+        assertTrue(body.contains("x=\"1.00\""))   // pan borné à 1.0
+        assertTrue(body.contains("y=\"-0.50\""))  // tilt
+        assertTrue(body.contains("ContinuousMove"))
+    }
+
+    @Test
+    fun onvif_ptz_stop_body() {
+        val body = OnvifTools.stopBody("Profile_1")
+        assertTrue(body.contains("<Stop"))
+        assertTrue(body.contains("<PanTilt>true</PanTilt>"))
+        assertTrue(body.contains("<Zoom>true</Zoom>"))
+    }
+
+    @Test
+    fun onvif_parse_device_information() {
+        val xml = """
+            <s:Body><tds:GetDeviceInformationResponse>
+            <tds:Manufacturer>ACME</tds:Manufacturer><tds:Model>Cam-9000</tds:Model>
+            <tds:FirmwareVersion>1.2.3</tds:FirmwareVersion><tds:SerialNumber>SN42</tds:SerialNumber>
+            </tds:GetDeviceInformationResponse></s:Body>
+        """.trimIndent()
+        val info = OnvifTools.parseDeviceInformation(xml)
+        assertEquals("ACME", info.manufacturer)
+        assertEquals("Cam-9000", info.model)
+        assertEquals("1.2.3", info.firmware)
+    }
+
+    @Test
+    fun onvif_parse_profile_tokens() {
+        val xml = """
+            <trt:GetProfilesResponse>
+            <trt:Profiles token="MainStream" fixed="true"></trt:Profiles>
+            <trt:Profiles token="SubStream"></trt:Profiles>
+            </trt:GetProfilesResponse>
+        """.trimIndent()
+        val tokens = OnvifTools.parseProfileTokens(xml)
+        assertEquals(listOf("MainStream", "SubStream"), tokens)
+    }
+
+    @Test
+    fun onvif_soap_fault_detected() {
+        val fault = "<s:Body><s:Fault><s:Reason><s:Text>Sender not authorized</s:Text></s:Reason></s:Fault></s:Body>"
+        assertEquals("Sender not authorized", OnvifTools.soapFaultReason(fault))
+        assertEquals(null, OnvifTools.soapFaultReason("<s:Body><ok/></s:Body>"))
     }
 
     // --- Flipper .sub parsing ---
