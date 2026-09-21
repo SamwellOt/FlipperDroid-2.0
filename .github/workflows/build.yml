@@ -55,28 +55,6 @@ jobs:
           files: build/outputs/apk/debug/*.apk
           generate_release_notes: true
 
-      - name: Publish v2.1.0 Release (manual dispatch from feature branch)
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/claude/happy-franklin-wjei0n'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v2.1.0
-          name: FlipperDroid v2.1.0 - IP Cameras module
-          files: build/outputs/apk/debug/*.apk
-          generate_release_notes: true
-          body: |
-            FlipperDroid v2.1.0 - IP Cameras module
-
-            New "IP Cameras" module (Wi-Fi & Network):
-            - ONVIF discovery (WS-Discovery multicast) + /24 camera-port scan with
-              a vendor heuristic (Hikvision/Dahua/XM...).
-            - RTSP OPTIONS auth probe and ONVIF GetDeviceInformation.
-            - Default-credential audit (dictionary over ONVIF GetDeviceInformation
-              with a WS-Security UsernameToken).
-            - PTZ control (ONVIF ContinuousMove / Stop).
-
-            The APK below is the debug build produced by CI (installable on
-            Android 7+). For authorized security testing only.
-
       - name: Publish v2.0.0 Release with APK (on main)
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
