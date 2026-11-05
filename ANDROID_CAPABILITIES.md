@@ -19,7 +19,7 @@ poderia fazer nativamente (🟢), precisa root (🔴), precisa hardware externo 
 - ✅ **HCE — emular cartão** (`HostApduService`) — já registrado no app.
 - 🟢 **NDEF write / formatação** de tags.
 - 🟢 **Clonar UID** para cartões "magic" (já implementado).
-- 🟢 **Relay NFC/HCE** (encaminhar APDUs POS↔servidor): tecnicamente possível via HostApduService; é a base do "tap-and-steal". Limite: o AID precisa ser conhecido/registrado; roteamento total exige root. **Uso estritamente autorizado.**
+- ⚠️ **Relay NFC/HCE**: exigiria dois aparelhos (HCE de um lado, leitor do outro) com encaminhamento bidirecional. O antigo módulo "NFC Relay Attack" não retransmitia nada e foi removido na 2.2.0; a captura/replay de diálogo APDU continua em **Card Emulation**.
 - ⛔ Recuperação de chaves Nested/Darkside (o controlador NFC não expõe o rádio).
 - ⛔ RFID 125 kHz (LF) — hardware diferente.
 

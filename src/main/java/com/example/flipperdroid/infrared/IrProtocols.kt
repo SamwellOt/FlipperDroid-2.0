@@ -8,6 +8,21 @@ package com.example.flipperdroid.infrared
  */
 object IrProtocols {
 
+    /** Message affiché quand aucun émetteur IR n'est disponible : rien n'est émis. */
+    const val NO_EMITTER_MSG = "No IR emitter on this device — nothing sent"
+
+    /**
+     * Parse une adresse saisie en hexadécimal, avec préfixe optionnel "0x"/"0X".
+     * @return la valeur, ou null si la saisie n'est pas de l'hexadécimal valide.
+     */
+    fun parseHexAddress(text: String): Int? {
+        val digits = text.trim().removePrefix("0x").removePrefix("0X")
+        if (!HEX_DIGITS.matches(digits)) return null
+        return digits.toIntOrNull(16)
+    }
+
+    private val HEX_DIGITS = Regex("[0-9A-Fa-f]{1,8}")
+
     /** @return (fréquence Hz, motif µs) ou null si protocole inconnu. */
     fun encode(protocol: String, address: Int, command: Int): Pair<Int, IntArray>? {
         return when (protocol.uppercase().replace("_", "")) {
@@ -23,6 +38,8 @@ object IrProtocols {
             // RC5X : commande étendue 7 bits (0..127) via le 2e bit de start.
             "RC5X" -> 36000 to rc5(address and 0x1F, command and 0x7F, extended = true)
             // RC6 mode 0 (Manchester, convention inverse de RC5, bit toggle double).
+            // LIMITATION : "RC6X" n'est pas un vrai RC6X. C'est un simple alias de RC6 mode 0
+            // (la commande étendue et les autres modes ne sont pas encodés).
             "RC6", "RC6X" -> 36000 to rc6(address and 0xFF, command and 0xFF)
             "JVC" -> 38000 to jvc(address and 0xFF, command and 0xFF)
             "APPLE", "APPLETV" -> 38000 to apple(command and 0xFF)
@@ -86,13 +103,37 @@ object IrProtocols {
             else -> Triple(frame, 40000, 3)
         }
         val count = if (presses > 0) presses else defaultCount
-        val out = ArrayList<Int>(frame.size + (count - 1) * (repeatFrame.size + 1))
-        for (v in frame) out.add(v)
-        repeat(count - 1) {
-            out.add(gapUs)                 // espace inter-trame (le motif reprend par un mark)
+        return freq to repeatFrames(frame, repeatFrame, count, gapUs)
+    }
+
+    /**
+     * Enchaîne [count] trames : [first], puis [repeatFrame] répétée (count - 1) fois, avec
+     * un intervalle [gapUs] entre deux trames. Le motif est supposé commencer par un mark.
+     *
+     * Les éléments alternent mark (indice pair) / space (indice impair). Si le motif en cours
+     * a une longueur paire, il se termine par un space : l'intervalle est alors **ajouté à ce
+     * space** (sinon il deviendrait un mark et inverserait toutes les répétitions). Sinon
+     * (motif finissant sur un mark) l'intervalle est ajouté comme nouvel élément.
+     */
+    fun repeatFrames(first: IntArray, repeatFrame: IntArray, count: Int, gapUs: Int): IntArray {
+        val out = ArrayList<Int>(first.size + maxOf(0, count - 1) * (repeatFrame.size + 1))
+        for (v in first) out.add(v)
+        for (k in 1 until count) {
+            appendGap(out, gapUs)
             for (v in repeatFrame) out.add(v)
         }
-        return freq to out.toIntArray()
+        return out.toIntArray()
+    }
+
+    /** Ajoute un intervalle au motif en respectant l'alternance mark/space (voir [repeatFrames]). */
+    private fun appendGap(out: ArrayList<Int>, gapUs: Int) {
+        if (out.isEmpty()) return
+        if (out.size % 2 == 0) {
+            // Le motif se termine par un space : on prolonge ce space.
+            out[out.size - 1] = out[out.size - 1] + gapUs
+        } else {
+            out.add(gapUs)
+        }
     }
 
     /** Code de répétition NEC : en-tête 9000/2250 puis mark final 560 (bouton maintenu). */

@@ -2,6 +2,7 @@ package com.example.flipperdroid.network
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.example.flipperdroid.util.ShellArgs
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
@@ -34,51 +35,43 @@ object PacketSniffer {
         onPacket: (PacketCapture) -> Unit
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val commands = mutableListOf("tcpdump")
-
-            // Interface
-            commands.addAll(listOf("-i", iface))
-
-            // No DNS resolution
-            commands.add("-n")
-
-            // Packet count
-            commands.addAll(listOf("-c", maxPackets.toString()))
-
-            // Output format (line-based for easy parsing)
-            commands.add("-A")
-
-            // Filter expression
-            if (filter.isNotEmpty()) {
-                commands.add(filter)
+            if (!ShellArgs.isValidInterface(iface)) {
+                return@withContext Result.failure(IllegalArgumentException("Invalid interface name: $iface"))
             }
-
-            // Output file
-            if (outputFile != null) {
-                commands.addAll(listOf("-w", outputFile))
+            if (filter.any { it == '\n' || it == '\r' }) {
+                return@withContext Result.failure(IllegalArgumentException("Invalid BPF filter"))
             }
+            // Chaque argument est quoté : le filtre BPF est passé tel quel à tcpdump
+            // (parenthèses comprises) sans être interprété par le shell root.
+            val args = mutableListOf("tcpdump", "-i", iface, "-n", "-l", "-c", maxPackets.coerceIn(1, 100_000).toString())
+            if (outputFile != null) args.addAll(listOf("-w", outputFile))
+            if (filter.isNotBlank()) args.add(filter.trim())
 
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", commands.joinToString(" ")))
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", ShellArgs.join(args)))
             currentProcess = process
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val stderr = StringBuffer()
+            val errThread = Thread {
+                try { process.errorStream.bufferedReader().forEachLine { stderr.append(it).append('\n') } } catch (_: Exception) {}
+            }.apply { isDaemon = true; start() }
 
-            var line: String?
             val output = StringBuilder()
-
-            while (reader.readLine().also { line = it } != null) {
-                line?.let { l ->
-                    val capture = parsePacketLine(l)
-                    if (capture != null) {
-                        onPacket(capture)
-                    }
+            process.inputStream.bufferedReader().use { reader ->
+                while (true) {
+                    val l = reader.readLine() ?: break
+                    parsePacketLine(l)?.let(onPacket)
                     output.append(l).append("\n")
                 }
             }
-
-            reader.close()
-            process.waitFor()
-
-            Result.success(output.toString())
+            val code = process.waitFor()
+            errThread.join(1000)
+            val err = stderr.toString()
+            when {
+                err.contains("not found", true) || err.contains("inaccessible or not found", true) ->
+                    Result.failure(IllegalStateException("tcpdump is not installed on this device (it is not bundled with the app)."))
+                code != 0 && output.isEmpty() ->
+                    Result.failure(IllegalStateException("tcpdump failed (exit $code): ${err.take(300)}"))
+                else -> Result.success(output.toString())
+            }
         } catch (e: Exception) {
             Result.failure(e)
         } finally {
@@ -141,26 +134,26 @@ object PacketSniffer {
         return if (parts.isEmpty()) "" else parts.joinToString(" and ", prefix = "'", postfix = "'")
     }
 
-    private fun parsePacketLine(line: String): PacketCapture? {
-        return try {
-            val parts = line.split(" ").filter { it.isNotEmpty() }
-            if (parts.size < 3) return null
+    // En-tête tcpdump -n : "12:00:00.123456 IP 10.0.0.5.443 > 10.0.0.9.51234: Flags [P.], ... length 42"
+    private val HEADER = Regex("""^(\d{2}:\d{2}:\d{2}\.\d+)\s+(IP6?|ARP)\s+(\S+)\s+>\s+(\S+?):\s*(.*)$""")
 
-            PacketCapture(
-                timestamp = parts.getOrNull(0) ?: "unknown",
-                source = parts.getOrNull(1) ?: "unknown",
-                destination = parts.getOrNull(2) ?: "unknown",
-                protocol = extractProtocol(line),
-                length = extractLength(line),
-                payload = line.substringAfterLast(":").trim()
-            )
-        } catch (e: Exception) {
-            null
-        }
+    /** Ne retient que les lignes d'en-tête de paquet (pas les lignes de charge utile). */
+    fun parsePacketLine(line: String): PacketCapture? {
+        val m = HEADER.find(line) ?: return null
+        val (ts, family, src, dst, rest) = m.destructured
+        return PacketCapture(
+            timestamp = ts,
+            source = src,
+            destination = dst,
+            protocol = if (family == "ARP") "ARP" else extractProtocol(rest),
+            length = extractLength(rest),
+            payload = rest.take(200)
+        )
     }
 
     private fun extractProtocol(line: String): String {
         return when {
+            line.contains("Flags [") -> "TCP"
             line.contains("TCP") || line.contains(".tcp") -> "TCP"
             line.contains("UDP") || line.contains(".udp") -> "UDP"
             line.contains("ICMP") -> "ICMP"
@@ -183,13 +176,14 @@ object PacketSniffer {
         val sb = StringBuilder()
         sb.append("Timestamp,Source,Destination,Protocol,Length,Payload\n")
 
+        fun q(v: String) = "\"" + v.replace("\"", "\"\"").replace('\n', ' ').replace('\r', ' ') + "\""
         captures.forEach { capture ->
-            sb.append("\"${capture.timestamp}\",")
-            sb.append("\"${capture.source}\",")
-            sb.append("\"${capture.destination}\",")
-            sb.append("\"${capture.protocol}\",")
-            sb.append("${capture.length},")
-            sb.append("\"${capture.payload.take(100)}\"\n")
+            sb.append(q(capture.timestamp)).append(',')
+            sb.append(q(capture.source)).append(',')
+            sb.append(q(capture.destination)).append(',')
+            sb.append(q(capture.protocol)).append(',')
+            sb.append(capture.length).append(',')
+            sb.append(q(capture.payload.take(100))).append('\n')
         }
 
         return sb.toString()

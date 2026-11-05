@@ -13,10 +13,12 @@ import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -26,15 +28,18 @@ import com.journeyapps.barcodescanner.ScanOptions
 
 /**
  * Scanner de QR codes / codes-barres via la caméra (bibliothèque ZXing embedded).
- * Affiche le contenu lu, permet de le copier et d'ouvrir les URL.
+ * Affiche le contenu lu, permet de le copier et d'ouvrir les URL (après confirmation).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QrScannerScreen(navController: NavController) {
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
-    var scannedContent by remember { mutableStateOf<String?>(null) }
-    var scannedFormat by remember { mutableStateOf<String?>(null) }
+    // Résultat conservé lors des rotations / recréations d'activité
+    var scannedContent by rememberSaveable { mutableStateOf<String?>(null) }
+    var scannedFormat by rememberSaveable { mutableStateOf<String?>(null) }
+    // URI en attente de confirmation avant ouverture
+    var pendingUri by rememberSaveable { mutableStateOf<String?>(null) }
 
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
         if (result.contents != null) {
@@ -105,7 +110,7 @@ fun QrScannerScreen(navController: NavController) {
                                 Text("Copy")
                             }
                             if (isUrl) {
-                                OutlinedButton(onClick = { uriHandler.openUri(content) }) {
+                                OutlinedButton(onClick = { pendingUri = content }) {
                                     Icon(Icons.Default.OpenInNew, contentDescription = null)
                                     Spacer(Modifier.width(4.dp))
                                     Text("Open")
@@ -116,6 +121,31 @@ fun QrScannerScreen(navController: NavController) {
                 }
             }
         }
+    }
+
+    // Confirmation avant d'ouvrir une URL lue depuis un code (URI complète affichée)
+    pendingUri?.let { uri ->
+        AlertDialog(
+            onDismissRequest = { pendingUri = null },
+            title = { Text("Open this link?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("A scanned code points to:", style = MaterialTheme.typography.bodyMedium)
+                    androidx.compose.foundation.text.selection.SelectionContainer {
+                        Text(uri, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingUri = null
+                    runCatching { uriHandler.openUri(uri) }
+                }) { Text("Open") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingUri = null }) { Text("Cancel") }
+            }
+        )
     }
 }
 

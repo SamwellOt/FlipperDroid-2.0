@@ -18,8 +18,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 data class BleGattFuzzResult(
     val device: String,
@@ -50,18 +51,32 @@ class BleGattFuzzerViewModel(private val context: Context) : ViewModel() {
     private val fuzzPayloads = FuzzPayloadLibrary.getPayloads()
 
     fun addLog(message: String) {
-        val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
+        val timestamp = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
         val newLog = "[$timestamp] $message\n" + _log.value
         _log.value = newLog.take(5000)
         AppLog.log("GATT-Fuzzer", message)
     }
+
+    /** Démarre sur le premier appareil appairé ; rapporte clairement s'il n'y en a pas. */
+    fun startFirstBondedDevice() {
+        val adapter = bluetoothAdapter
+        if (adapter == null) { addLog("Bluetooth not available on this device"); return }
+        val device = try { adapter.bondedDevices?.firstOrNull() } catch (e: SecurityException) {
+            addLog("Missing BLUETOOTH_CONNECT permission"); return
+        }
+        if (device == null) { addLog("No bonded device: pair the target in Android settings first"); return }
+        startFuzzing(device)
+    }
+
+    private fun safeName(device: BluetoothDevice): String =
+        try { device.name ?: device.address } catch (_: SecurityException) { device.address }
 
     fun startFuzzing(device: BluetoothDevice) {
         if (_isFuzzing.value) return
         viewModelScope.launch {
             _isFuzzing.value = true
             _fuzzResults.value = emptyList()
-            addLog("Starting GATT fuzzing on: ${device.name} (${device.address})")
+            addLog("Starting GATT fuzzing on: ${safeName(device)} (${device.address})")
 
             connectDevice(device)
         }
@@ -72,10 +87,10 @@ class BleGattFuzzerViewModel(private val context: Context) : ViewModel() {
             val gattCallback = object : BluetoothGattCallback() {
                 override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
                     if (newState == BluetoothGatt.STATE_CONNECTED) {
-                        addLog("Connected to ${device.name}")
+                        addLog("Connected to ${safeName(device)}")
                         gatt.discoverServices()
                     } else if (newState == BluetoothGatt.STATE_DISCONNECTED) {
-                        addLog("Disconnected from ${device.name}")
+                        addLog("Disconnected from ${safeName(device)}")
                         _isFuzzing.value = false
                     }
                 }
@@ -121,7 +136,8 @@ class BleGattFuzzerViewModel(private val context: Context) : ViewModel() {
                 }
             }
 
-            gatt.disconnect()
+            try { gatt.disconnect(); gatt.close() } catch (_: Exception) {}
+            if (currentGatt === gatt) currentGatt = null
             _isFuzzing.value = false
             addLog("Fuzzing completed")
         }
@@ -137,7 +153,7 @@ class BleGattFuzzerViewModel(private val context: Context) : ViewModel() {
                 @Suppress("DEPRECATION")
                 gatt.writeCharacteristic(characteristic)
             }
-            addLog("Wrote ${payload.name} to characteristic")
+            addLog("Submitted ${payload.name} (${payload.data.size} B) — stack acceptance not confirmed")
         } catch (e: Exception) {
             addLog("Write failed: ${e.message}")
         }
@@ -153,7 +169,7 @@ class BleGattFuzzerViewModel(private val context: Context) : ViewModel() {
                 @Suppress("DEPRECATION")
                 gatt.writeCharacteristic(characteristic)
             }
-            addLog("Wrote ${payload.name} (no response)")
+            addLog("Submitted ${payload.name} (${payload.data.size} B, no response)")
         } catch (e: Exception) {
             addLog("Write no response failed: ${e.message}")
         }
@@ -161,8 +177,8 @@ class BleGattFuzzerViewModel(private val context: Context) : ViewModel() {
 
     fun stopFuzzing() {
         _isFuzzing.value = false
-        currentGatt?.disconnect()
-        currentGatt?.close()
+        try { currentGatt?.disconnect(); currentGatt?.close() } catch (_: Exception) {}
+        currentGatt = null
         addLog("Fuzzing stopped")
     }
 

@@ -128,8 +128,6 @@ fun HomeScreen(
             "Emulate an NFC NDEF tag (HCE Type 4): the phone serves a URL/text when read by an NFC reader or a phone in reader mode."),
         FeatureItem("Card Emulation", Icons.Default.Contactless, "emv_emulation", "NFC & RFID",
             "Emulate a captured ISO-DEP card via HCE (replays its APDU responses). Capture from NFC Reader. Mifare Classic can't be emulated; EMV can't be replayed to pay."),
-        FeatureItem("NFC Relay Attack", Icons.Default.Nfc, "nfc_relay", "NFC & RFID",
-            "Capture and relay NFC/EMV exchanges. Advanced testing for NFC card security."),
 
         // --- Bluetooth & BLE ---
         FeatureItem("BLE Spam", Icons.Default.Bluetooth, "bluetooth", "Bluetooth & BLE",

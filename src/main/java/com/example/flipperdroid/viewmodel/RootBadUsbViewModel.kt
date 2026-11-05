@@ -1,6 +1,8 @@
 package com.example.flipperdroid.viewmodel
 
 import android.util.Log
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.CancellationException
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -56,8 +58,9 @@ class RootBadUsbViewModel : ViewModel() {
 
     fun runScript() {
         if (_isRunning.value) return
+        // Positionné avant launch : deux appuis rapides ne lancent plus deux exécutions.
+        _isRunning.value = true
         job = viewModelScope.launch(Dispatchers.IO) {
-            _isRunning.value = true
             try {
                 if (!hasRoot()) { _status.value = "No root access."; return@launch }
                 val dev = firstHidDevice()
@@ -75,10 +78,18 @@ class RootBadUsbViewModel : ViewModel() {
                 } finally {
                     // Cleanup dans finally : sur annulation (stop()), executeDucky lève une
                     // CancellationException — sans ce finally, le process root et son flux
-                    // resteraient ouverts.
+                    // resteraient ouverts. On envoie d'abord un rapport « tout relâché » :
+                    // un arrêt entre appui et relâchement laissait Shift/Ctrl/GUI enfoncé
+                    // sur la machine cible.
+                    withContext(NonCancellable) {
+                        try { out.write(ByteArray(8)); out.flush() } catch (_: Exception) {}
+                    }
                     try { out.flush(); out.close() } catch (_: Exception) {}
                     try { process.destroy() } catch (_: Exception) {}
                 }
+            } catch (e: CancellationException) {
+                _status.value = "Stopped."
+                throw e
             } catch (e: Exception) {
                 _status.value = "Error: ${e.message}"
                 Log.e("RootBadUsb", "runScript", e)

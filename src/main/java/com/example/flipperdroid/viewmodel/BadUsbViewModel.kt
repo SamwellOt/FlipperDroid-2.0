@@ -24,6 +24,7 @@ import java.nio.ByteBuffer
  */
 class BadUsbViewModel : ViewModel() {
 
+    private var hasHostFeature = false
     private val _isUsbHostAvailable = mutableStateOf(false)
 
     /*
@@ -56,7 +57,9 @@ class BadUsbViewModel : ViewModel() {
      * @param context contexte de l'application necessaire pour acceder au service USB
      */
     fun initialize(context: Context) {
-        usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+        usbManager = context.getSystemService(Context.USB_SERVICE) as? UsbManager
+        // Le service USB existe aussi sur les appareils sans mode hôte : on teste la feature.
+        hasHostFeature = context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_USB_HOST)
         checkUsbHostSupport()
     }
     /**
@@ -65,10 +68,9 @@ class BadUsbViewModel : ViewModel() {
      * Met a jour l'état isUsbHostAvailable et le status associe
      */
     private fun checkUsbHostSupport() {
-        _isUsbHostAvailable.value = usbManager != null
-        if (!_isUsbHostAvailable.value) {
-            _status.value = "USB Host not supported on this device"
-        }
+        _isUsbHostAvailable.value = usbManager != null && hasHostFeature
+        _status.value = if (!_isUsbHostAvailable.value) "USB Host not supported on this device"
+            else "Experimental USB-host mode: the phone is the USB host here, so it cannot type on a PC. Use BadUSB (root) for real keystroke injection."
     }
     /**
      * Connecte l'appareil USB fourni et prepare l'interface HID clavier
@@ -104,9 +106,12 @@ class BadUsbViewModel : ViewModel() {
         }
 
         if (usbInterface != null && usbEndpoint != null) {
-            connection.claimInterface(usbInterface, true)
-            _isConnected.value = true
-            _status.value = "Connected as USB Keyboard"
+            if (connection.claimInterface(usbInterface, true)) {
+                _isConnected.value = true
+                _status.value = "Claimed HID interface of the attached device (host mode — not a keyboard emulation)"
+            } else {
+                _status.value = "Could not claim the USB interface"
+            }
         } else {
             _status.value = "Failed to initialize USB HID interface"
         }
@@ -164,7 +169,7 @@ class BadUsbViewModel : ViewModel() {
                     delay(50)
                 }
 
-                _status.value = "Script executed successfully"
+                _status.value = "Script sent to the attached USB device"
             } catch (e: Exception) {
                 _status.value = "Error executing script: ${e.message}"
                 Log.e("BadUsbViewModel", "Error executing script", e)
@@ -218,12 +223,14 @@ class BadUsbViewModel : ViewModel() {
         buffer.put(keycode.toByte())  // Keycode
         buffer.put(ByteArray(5))      // Padding
 
-        usbConnection?.bulkTransfer(
+        val sent = usbConnection?.bulkTransfer(
             usbEndpoint,
             buffer.array(),
             buffer.capacity(),
             1000
-        )
+        ) ?: -1
+        // Résultat vérifié : avant, un échec était annoncé "Script executed successfully".
+        if (sent < 0) throw java.io.IOException("USB transfer failed")
 
         // Send key release
         val releaseBuffer = ByteBuffer.allocate(8)

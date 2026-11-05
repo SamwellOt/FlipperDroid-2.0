@@ -6,7 +6,8 @@ package com.example.flipperdroid.infrared
  * température, ventilation, oscillation) dans une seule trame longue avec somme
  * de contrôle. Timings et layout repris d'IRremoteESP8266 / SB-Projects.
  *
- * ⚠ IMPORTANT — HONNÊTETÉ DE CAPACITÉ : hormis [gree] (validé), les protocoles
+ * ⚠ IMPORTANT — HONNÊTETÉ DE CAPACITÉ : [gree] a une structure de trame testée
+ * unitairement, mais aucun protocole n'est validé sur appareil réel. Les autres
  * de ce fichier sont des portages de référence *non vérifiés sur un appareil
  * réel*. La structure de trame (en-tête, timings, découpage en sections, somme
  * de contrôle) suit la documentation, mais l'encodage exact de certains champs
@@ -39,8 +40,31 @@ object AcProtocols {
         val temp: Int get() = tempC.coerceIn(16, 30)
     }
 
-    /** Marques disponibles (pour l'UI). */
-    enum class Brand { GREE, COOLIX, LG, MIDEA, SAMSUNG, FUJITSU, KELVINATOR, HAIER, DAIKIN, MITSUBISHI, PANASONIC }
+    /**
+     * Marques disponibles (pour l'UI).
+     * @param supportsFanMode false si l'encodeur n'a pas de mode "ventilation seule" fiable
+     *   (Midea : son code 0x4 est partagé avec Dry ; Coolix : retombe sur Auto). L'UI masque
+     *   alors l'option et la VM refuse l'envoi.
+     * @param supportsSwing false si l'encodeur ignore l'oscillation (LG, Coolix, Midea, Samsung).
+     * @param approximateChecksum true si la somme de contrôle est une approximation.
+     */
+    enum class Brand(
+        val supportsFanMode: Boolean = true,
+        val supportsSwing: Boolean = true,
+        val approximateChecksum: Boolean = false
+    ) {
+        GREE,
+        COOLIX(supportsFanMode = false, supportsSwing = false),
+        LG(supportsSwing = false),
+        MIDEA(supportsFanMode = false, supportsSwing = false),
+        SAMSUNG(supportsSwing = false, approximateChecksum = true),
+        FUJITSU,
+        KELVINATOR,
+        HAIER,
+        DAIKIN,
+        MITSUBISHI,
+        PANASONIC
+    }
 
     /** Point d'entrée générique : encode l'état pour la marque choisie. */
     fun encode(brand: Brand, power: Boolean, mode: Int, tempC: Int, fan: Int, swing: Boolean): Pair<Int, IntArray> {
@@ -61,7 +85,7 @@ object AcProtocols {
     }
 
     // =====================================================================
-    // Gree YAW1F / YB1F (8 octets) — VALIDÉ (test unitaire dédié).
+    // Gree YAW1F / YB1F (8 octets) — structure de trame testée (test unitaire dédié), NON validée sur appareil.
     // =====================================================================
 
     /**
@@ -152,6 +176,7 @@ object AcProtocols {
             0xB27BE0 // OFF documenté
         } else {
             val tIdx = (s.temp.coerceIn(17, 30) - 17)
+            // MODE_FAN non encodé (Brand.COOLIX.supportsFanMode = false) : retombe sur Auto ici.
             val modeCode = when (s.mode) {
                 MODE_COOL -> 0x0; MODE_DRY -> 0x4; MODE_AUTO -> 0x8; MODE_HEAT -> 0xC; else -> 0x8
             }
@@ -224,8 +249,9 @@ object AcProtocols {
         val tempMap = intArrayOf(0, 1, 3, 2, 6, 7, 5, 4, 12, 13, 9, 8, 10, 11) // 17..30
         val tIdx = (s.temp.coerceIn(17, 30) - 17)
         val fanCode = when (s.fan) { FAN_LOW -> 0x9; FAN_MED -> 0x5; FAN_HIGH -> 0x3; else -> 0xB }
+        // MODE_FAN n'est pas encodé : son code 0x4 serait confondu avec Dry (Brand.MIDEA.supportsFanMode = false).
         val modeCode = when (s.mode) {
-            MODE_COOL -> 0x0; MODE_DRY -> 0x4; MODE_AUTO -> 0x8; MODE_HEAT -> 0xC; MODE_FAN -> 0x4; else -> 0x8
+            MODE_COOL -> 0x0; MODE_DRY -> 0x4; MODE_AUTO -> 0x8; MODE_HEAT -> 0xC; else -> 0x8
         }
         val b0 = 0xB2
         val b1 = (fanCode shl 4) or 0x0F

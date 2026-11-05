@@ -115,25 +115,31 @@ fun InfraredScreen(navController: NavController) {
     val sendCommand: (String) -> Unit = { cmdKey ->
         val brand = selectedBrand
         val cmd = brand.commands[cmdKey]
+        val manager = irManager
         if (cmd != null) {
-            scope.launch {
-                val errorMsg = withContext(Dispatchers.IO) {
-                    val signal = IrProtocols.encode(brand.protocol, brand.address, cmd)
-                        ?: return@withContext "Unsupported protocol: ${brand.protocol}"
-                    val (freq, pattern) = signal
-                    try {
-                        repeat(brand.repeatCount) { i ->
-                            irManager?.transmit(freq, pattern)
-                            if (i < brand.repeatCount - 1 && brand.repeatGapMs > 0) {
-                                delay(brand.repeatGapMs)
+            if (manager == null || !manager.hasIrEmitter()) {
+                // Rien ne peut partir : on ne doit pas afficher "envoyé".
+                lastStatus = IrProtocols.NO_EMITTER_MSG
+            } else {
+                scope.launch {
+                    val errorMsg = withContext(Dispatchers.IO) {
+                        val signal = IrProtocols.encode(brand.protocol, brand.address, cmd)
+                            ?: return@withContext "Unsupported protocol: ${brand.protocol}"
+                        val (freq, pattern) = signal
+                        try {
+                            repeat(brand.repeatCount) { i ->
+                                manager.transmit(freq, pattern)
+                                if (i < brand.repeatCount - 1 && brand.repeatGapMs > 0) {
+                                    delay(brand.repeatGapMs)
+                                }
                             }
+                            null
+                        } catch (e: Exception) {
+                            "Transmit error: ${e.message}"
                         }
-                        null
-                    } catch (e: Exception) {
-                        "Transmit error: ${e.message}"
                     }
+                    lastStatus = errorMsg ?: "${brand.name}: $cmdKey (${brand.protocol})"
                 }
-                lastStatus = errorMsg ?: "${brand.name}: $cmdKey (${brand.protocol})"
             }
         }
     }
@@ -320,8 +326,11 @@ private fun RemoteButton(
     // Répète la commande tant que le bouton est maintenu (volume, canal, flèches).
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
+    // Vrai dès que la boucle "maintenu" a déjà émis pour l'appui en cours.
+    val holdFired = remember { mutableStateOf(false) }
     LaunchedEffect(isPressed) {
         if (isPressed) {
+            holdFired.value = true
             onFire()
             delay(400) // délai avant la répétition auto
             while (true) {
@@ -331,7 +340,11 @@ private fun RemoteButton(
         }
     }
     IconButton(
-        onClick = {},
+        onClick = {
+            // Activation sans appui maintenu (TalkBack, clavier) : une seule émission.
+            // Si la boucle "maintenu" a déjà émis, on ne double pas l'envoi.
+            if (holdFired.value) holdFired.value = false else onFire()
+        },
         interactionSource = interactionSource,
         modifier = Modifier.size(56.dp)
     ) {

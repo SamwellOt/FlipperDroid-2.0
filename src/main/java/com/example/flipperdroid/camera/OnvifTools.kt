@@ -21,6 +21,8 @@ object OnvifTools {
     private const val NS_WSA = "http://schemas.xmlsoap.org/ws/2004/08/addressing"
     private const val NS_WSD = "http://schemas.xmlsoap.org/ws/2005/04/discovery"
     private const val NS_DEVICE = "http://www.onvif.org/ver10/device/wsdl"
+    /** Espace de noms du type NetworkVideoTransmitter (WS-Discovery), distinct de device/wsdl. */
+    private const val NS_NETWORK = "http://www.onvif.org/ver10/network/wsdl"
     private const val NS_MEDIA = "http://www.onvif.org/ver10/media/wsdl"
     private const val NS_PTZ = "http://www.onvif.org/ver20/ptz/wsdl"
     private const val NS_SCHEMA = "http://www.onvif.org/ver10/schema"
@@ -53,7 +55,7 @@ object OnvifTools {
      */
     fun wsDiscoveryProbe(messageId: String): String =
         """<?xml version="1.0" encoding="UTF-8"?>
-<e:Envelope xmlns:e="$NS_SOAP" xmlns:w="$NS_WSA" xmlns:d="$NS_WSD" xmlns:dn="$NS_DEVICE">
+<e:Envelope xmlns:e="$NS_SOAP" xmlns:w="$NS_WSA" xmlns:d="$NS_WSD" xmlns:dn="$NS_NETWORK">
 <e:Header>
 <w:MessageID>$messageId</w:MessageID>
 <w:To e:mustUnderstand="true">urn:schemas-xmlsoap-org:ws:2005:04:discovery</w:To>
@@ -230,10 +232,14 @@ object OnvifTools {
 
     /** Détecte un SOAP Fault (mauvais identifiants, action non supportée…). */
     fun soapFaultReason(xml: String): String? {
-        if (!xml.contains("Fault", ignoreCase = true)) return null
+        // Un élément nommé Fault (avec ou sans préfixe) est requis : évite les faux positifs
+        // comme « DefaultUser ».
+        if (!SOAP_FAULT_TAG.containsMatchIn(xml)) return null
         return tagText(xml, "Text").ifBlank { tagText(xml, "faultstring") }
             .ifBlank { "SOAP Fault" }
     }
+
+    private val SOAP_FAULT_TAG = Regex("<(\\w+:)?Fault[\\s>]")
 
     // ---------------------------------------------------------------------
     // Utilitaires
@@ -247,7 +253,8 @@ object OnvifTools {
 
     /** Contenu textuel d'une balise, insensible au préfixe d'espace de noms. */
     private fun tagText(xml: String, local: String): String =
-        Regex("<(?:[A-Za-z0-9]+:)?$local>(.*?)</(?:[A-Za-z0-9]+:)?$local>",
+        // Accepte des attributs sur la balise (ex. <env:Text xml:lang="en">).
+        Regex("<(?:[A-Za-z0-9]+:)?$local(?:\\s[^>]*)?>(.*?)</(?:[A-Za-z0-9]+:)?$local>",
             setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
             .find(xml)?.groupValues?.get(1)?.trim() ?: ""
 

@@ -1,5 +1,8 @@
 package com.example.flipperdroid.infrared
 
+/** Intervalle inter-trame utilisé pour la rafale d'un bouton "raw". */
+private const val RAW_GAP_US = 40000
+
 /** Un bouton d'un fichier .ir (soit "parsed" avec protocole, soit "raw"). */
 data class IrButton(
     val name: String,
@@ -33,12 +36,7 @@ data class IrButton(
                 val data = rawData ?: return null
                 if (data.isEmpty()) return null
                 val count = if (presses > 0) presses else 3
-                val out = ArrayList<Int>(data.size * count + count)
-                repeat(count) { i ->
-                    if (i > 0) out.add(40000)   // espace inter-trame
-                    for (v in data) out.add(v)
-                }
-                frequency to out.toIntArray()
+                frequency to IrProtocols.repeatFrames(data, data, count, RAW_GAP_US)
             }
             else -> null
         }
@@ -63,8 +61,14 @@ data class IrButton(
  * frequency: 38000
  * data: 9000 4500 560 560 ...
  * ```
+ *
+ * Un bouton dont un octet hexadécimal ou une valeur de donnée brute est invalide est
+ * **ignoré** (et non transformé en 0) : mieux vaut un bouton absent qu'un code faux.
  */
 object IrFile {
+
+    private val HEX_BYTE = Regex("[0-9A-Fa-f]{1,2}")
+    private val WHITESPACE = Regex("\\s+")
 
     fun parse(text: String): List<IrButton> {
         val buttons = mutableListOf<IrButton>()
@@ -73,19 +77,26 @@ object IrFile {
         fun flush() {
             val name = cur["name"] ?: return
             val type = cur["type"] ?: return
-            val button = IrButton(
-                name = name,
-                type = type,
-                protocol = cur["protocol"],
-                address = parseHexBytesLE(cur["address"]),
-                command = parseHexBytesLE(cur["command"]),
-                frequency = cur["frequency"]?.trim()?.toIntOrNull() ?: 38000,
-                rawData = cur["data"]?.let { parseRaw(it) }
+            val address = parseHexBytesLE(cur["address"]) ?: return   // octet invalide : bouton ignoré
+            val command = parseHexBytesLE(cur["command"]) ?: return
+            val rawData = cur["data"]?.let { parseRaw(it) }
+            // Donnée brute présente mais corrompue : bouton ignoré.
+            if (cur.containsKey("data") && rawData == null) return
+            buttons.add(
+                IrButton(
+                    name = name,
+                    type = type,
+                    protocol = cur["protocol"],
+                    address = address,
+                    command = command,
+                    frequency = cur["frequency"]?.trim()?.toIntOrNull() ?: 38000,
+                    rawData = rawData
+                )
             )
-            buttons.add(button)
         }
 
-        for (raw in text.split("\n")) {
+        // lines() gère "\n" et "\r\n" ; le BOM éventuel en tête de fichier est retiré.
+        for (raw in text.removePrefix("﻿").lines()) {
             val line = raw.trim()
             if (line.isEmpty() || line.startsWith("#") || line.startsWith("Filetype") || line.startsWith("Version")) {
                 continue
@@ -105,19 +116,33 @@ object IrFile {
         return buttons
     }
 
-    /** Convertit "04 00 00 00" (little-endian) en entier. */
-    private fun parseHexBytesLE(s: String?): Int {
+    /**
+     * Convertit "04 00 00 00" (little-endian) en entier.
+     * @return 0 si la valeur est absente, null si un octet n'est pas hexadécimal valide.
+     */
+    private fun parseHexBytesLE(s: String?): Int? {
         if (s.isNullOrBlank()) return 0
         var result = 0
-        s.trim().split(Regex("\\s+")).forEachIndexed { i, byteStr ->
-            val b = byteStr.toIntOrNull(16) ?: 0
-            if (i < 4) result = result or (b shl (8 * i))
+        val tokens = s.trim().split(WHITESPACE)
+        for ((i, tok) in tokens.withIndex()) {
+            if (!HEX_BYTE.matches(tok)) return null
+            if (i < 4) result = result or (tok.toInt(16) shl (8 * i))
         }
         return result
     }
 
-    /** Convertit "9000 4500 560 ..." en tableau d'entiers. */
-    private fun parseRaw(s: String): IntArray {
-        return s.trim().split(Regex("\\s+")).mapNotNull { it.toIntOrNull() }.toIntArray()
+    /**
+     * Convertit "9000 4500 560 ..." en tableau d'entiers.
+     * @return null si un jeton n'est pas un entier strictement positif, ou si la liste est vide.
+     */
+    private fun parseRaw(s: String): IntArray? {
+        val tokens = s.trim().split(WHITESPACE)
+        val out = IntArray(tokens.size)
+        for ((i, tok) in tokens.withIndex()) {
+            val v = tok.toIntOrNull()
+            if (v == null || v <= 0) return null
+            out[i] = v
+        }
+        return if (out.isEmpty()) null else out
     }
 }

@@ -75,8 +75,8 @@ fun BadUsbScreen(
                     Text(
                         text = when {
                             !isUsbHostAvailable -> "USB Host not supported on this device"
-                            !isConnected -> "Not connected as USB keyboard"
-                            else -> "Ready to execute keyboard commands"
+                            !isConnected -> "No USB HID device attached (host mode)"
+                            else -> "Attached USB HID device claimed (host mode)"
                         },
                         style = MaterialTheme.typography.bodyLarge,
                         color = if (!isUsbHostAvailable || !isConnected)
@@ -150,7 +150,7 @@ fun BadUsbScreen(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Please connect your device to a computer via USB cable and enable USB debugging",
+                            text = "Experimental: in host mode the phone cannot act as a keyboard for a PC. For real keystroke injection use \"BadUSB (root)\" (USB gadget).",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )

@@ -110,8 +110,9 @@ class BluetoothViewModel : ViewModel() {
 
     fun initialize(context: Context) {
         this.context = context.applicationContext
-        val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        bluetoothAdapter = bluetoothManager.adapter
+        val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        bluetoothAdapter = bluetoothManager?.adapter
+        if (bluetoothAdapter == null) addLog("Bluetooth not available on this device")
         bluetoothLeScanner = bluetoothAdapter?.bluetoothLeScanner
         checkPermissions()
     }
@@ -122,8 +123,10 @@ class BluetoothViewModel : ViewModel() {
                 ContextCompat.checkSelfPermission(ctx, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
                 ContextCompat.checkSelfPermission(ctx, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
             } else {
+                // Avant Android 12, le scan BLE renvoie une liste vide sans la localisation.
                 ContextCompat.checkSelfPermission(ctx, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED &&
-                ContextCompat.checkSelfPermission(ctx, Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED
+                ContextCompat.checkSelfPermission(ctx, Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
             }
             _permissionsGranted.value = granted
         }
@@ -210,7 +213,11 @@ class BluetoothViewModel : ViewModel() {
             val ch = service.characteristics.firstOrNull { it.uuid.toString().equals(charUuid, true) } ?: return
             val bytes = hex.replace(" ", "").chunked(2).map { it.toInt(16).toByte() }.toByteArray()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                g.writeCharacteristic(ch, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+                val rc = g.writeCharacteristic(ch, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+                if (rc != android.bluetooth.BluetoothStatusCodes.SUCCESS) {
+                    addLog("Write rejected by stack (code $rc) — wait for the previous GATT operation")
+                    return
+                }
             } else {
                 @Suppress("DEPRECATION") run {
                     ch.value = bytes

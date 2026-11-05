@@ -55,26 +55,35 @@ class IrToolsViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun tvBGone(rounds: Int = 1) {
         if (_running.value) return
+        val manager = irManager
+        if (manager == null || !manager.hasIrEmitter()) {
+            _progress.value = IrProtocols.NO_EMITTER_MSG
+            return
+        }
+        _running.value = true   // mis à jour AVANT le lancement : un second tap est refusé immédiatement
         job = viewModelScope.launch(Dispatchers.IO) {
-            _running.value = true
             try {
                 val codes = collectPowerSignals()
                 _progress.value = "TV-B-Gone: ${codes.size} codes uniques chargés"
                 var sent = 0
+                var lastError: String? = null
                 repeat(rounds) {
                     for ((label, signal) in codes) {
                         if (!isActive) return@launch
                         val (freq, pattern) = signal
                         try {
-                            irManager?.transmit(freq, pattern)
+                            manager.transmit(freq, pattern)
                             sent++
-                        } catch (_: Exception) {}
+                        } catch (e: Exception) {
+                            lastError = e.message ?: e.javaClass.simpleName
+                        }
                         _progress.value = "Envoyé $sent/${codes.size} — $label"
                         // Laisse le temps au récepteur de traiter la pression avant la suivante.
                         delay(200)
                     }
                 }
-                _progress.value = "TV-B-Gone terminé : $sent émissions (${codes.size} codes uniques)"
+                val errTail = lastError?.let { " — erreur : $it" } ?: ""
+                _progress.value = "TV-B-Gone terminé : $sent émissions (${codes.size} codes uniques)$errTail"
                 AppLog.log("IRTools", "TV-B-Gone fired $sent bursts (${codes.size} unique codes)")
             } finally {
                 _running.value = false
@@ -113,7 +122,10 @@ class IrToolsViewModel(app: Application) : AndroidViewModel(app) {
                         addUnique("${file.removeSuffix(".ir")}/${b.name}", b.toSignal(), b.toBurst())
                     }
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            // Ne pas avaler : le balayage continue avec la liste curée, et le problème est journalisé.
+            AppLog.log("IRTools", "Chargement des .ir impossible : ${e.message}")
+        }
 
         for (pc in PowerCodes.EXTRA) {
             addUnique(pc.brand, pc.toSignal(), pc.toBurst())
@@ -132,8 +144,13 @@ class IrToolsViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun fireBrand(pc: PowerCode) {
         if (_running.value) return
+        val manager = irManager
+        if (manager == null || !manager.hasIrEmitter()) {
+            _progress.value = IrProtocols.NO_EMITTER_MSG
+            return
+        }
+        _running.value = true
         job = viewModelScope.launch(Dispatchers.IO) {
-            _running.value = true
             try {
                 val burst = pc.toBurst(presses = 6)
                 if (burst == null) {
@@ -142,10 +159,12 @@ class IrToolsViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val (freq, pattern) = burst
                 try {
-                    irManager?.transmit(freq, pattern)
-                } catch (_: Exception) {}
-                _progress.value = "Émis : ${pc.brand} (power). Rien ? Vise mieux et re-tape."
-                AppLog.log("IRTools", "Fired targeted power code ${pc.brand}")
+                    manager.transmit(freq, pattern)
+                    _progress.value = "Émis : ${pc.brand} (power). Rien ? Vise mieux et re-tape."
+                    AppLog.log("IRTools", "Fired targeted power code ${pc.brand}")
+                } catch (e: Exception) {
+                    _progress.value = "Échec de l'émission ${pc.brand} : ${e.message}"
+                }
             } finally {
                 _running.value = false
             }
@@ -155,21 +174,37 @@ class IrToolsViewModel(app: Application) : AndroidViewModel(app) {
     /** Balaye les commandes [start]..[end] pour (protocole, adresse). */
     fun bruteForce(protocol: String, address: Int, start: Int, end: Int, delayMs: Long) {
         if (_running.value) return
+        if (IrProtocols.encode(protocol, address, start) == null) {
+            _progress.value = "Unsupported protocol: $protocol"
+            return
+        }
+        val manager = irManager
+        if (manager == null || !manager.hasIrEmitter()) {
+            _progress.value = IrProtocols.NO_EMITTER_MSG
+            return
+        }
+        _running.value = true
         job = viewModelScope.launch(Dispatchers.IO) {
-            _running.value = true
             try {
                 var cmd = start
+                var lastError: String? = null
                 while (cmd <= end && isActive) {
                     _bruteCommand.value = cmd
-                    IrProtocols.encode(protocol, address, cmd)?.let { (freq, pattern) ->
-                        try { irManager?.transmit(freq, pattern) } catch (_: Exception) {}
+                    val step = IrProtocols.encode(protocol, address, cmd)
+                    if (step != null) {
+                        try {
+                            manager.transmit(step.first, step.second)
+                        } catch (e: Exception) {
+                            lastError = e.message ?: e.javaClass.simpleName
+                        }
                     }
                     val hex = cmd.toString(16).uppercase()
                     _progress.value = "Brute $protocol addr=0x${address.toString(16).uppercase()} cmd=0x$hex ($cmd)"
                     delay(delayMs)
                     cmd++
                 }
-                if (isActive) _progress.value = "Brute-force terminé (jusqu'à 0x${end.toString(16).uppercase()})"
+                val errTail = lastError?.let { " — erreur : $it" } ?: ""
+                if (isActive) _progress.value = "Brute-force terminé (jusqu'à 0x${end.toString(16).uppercase()})$errTail"
             } finally {
                 _running.value = false
             }

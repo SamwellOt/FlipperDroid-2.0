@@ -4,7 +4,6 @@ import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.selection.toggleable
@@ -26,7 +25,6 @@ import androidx.navigation.NavController
 import com.example.flipperdroid.viewmodel.BleSpamViewModel
 import androidx.compose.ui.graphics.Color
 
-@RequiresApi(Build.VERSION_CODES.S)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BleSpamScreen(
@@ -45,15 +43,23 @@ fun BleSpamScreen(
     val spamLogs by viewModel.spamLogs.collectAsState()
     val speedMs by viewModel.speedMs.collectAsState()
 
-    // Permissions à demander
-    val permissions = mutableListOf(
-        Manifest.permission.BLUETOOTH_ADVERTISE,
-        Manifest.permission.BLUETOOTH_SCAN,
-        Manifest.permission.BLUETOOTH_CONNECT
-    ).apply {
-        add(Manifest.permission.ACCESS_FINE_LOCATION)
-        add(Manifest.permission.ACCESS_COARSE_LOCATION)
-    }.toTypedArray()
+    // Permissions à demander : les permissions BLUETOOTH_* runtime n'existent qu'à
+    // partir d'Android 12 (API 31). En dessous, les demander renvoie toujours "refusé"
+    // et l'écran restait bloqué ; on demande alors la localisation (requise pour le BLE).
+    val permissions = remember {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            arrayOf(
+                Manifest.permission.BLUETOOTH_ADVERTISE,
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_CONNECT
+            )
+        } else {
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            )
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()

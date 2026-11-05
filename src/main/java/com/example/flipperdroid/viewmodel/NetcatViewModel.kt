@@ -8,6 +8,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import java.io.File
 import java.io.OutputStream
 import java.net.DatagramPacket
@@ -42,13 +43,13 @@ class NetcatViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var httpRunning = false
     private var httpThread: Thread? = null
 
-    private fun appendLog(line: String) { _log.value = (_log.value + line).takeLast(300) }
+    private fun appendLog(line: String) { _log.update { (it + line).takeLast(300) } }
 
     fun clearLog() { _log.value = emptyList() }
 
     // --- TCP client ---
     fun tcpConnect(host: String, port: Int) {
-        if (_connected.value) { appendLog("[already connected]"); return }
+        if (_connected.value || connJob?.isActive == true) { appendLog("[already connected or connecting]"); return }
         connJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 val s = Socket()
@@ -66,7 +67,7 @@ class NetcatViewModel(app: Application) : AndroidViewModel(app) {
 
     // --- TCP listener ---
     fun tcpListen(port: Int) {
-        if (_connected.value) { appendLog("[busy]"); return }
+        if (_connected.value || connJob?.isActive == true) { appendLog("[busy]"); return }
         connJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 val srv = ServerSocket(port)
@@ -139,21 +140,28 @@ class NetcatViewModel(app: Application) : AndroidViewModel(app) {
     // --- HTTP file server (serves the app's external files dir) ---
     fun startHttp(port: Int) {
         if (httpRunning) { appendLog("[http already running]"); return }
-        val base = getApplication<Application>().getExternalFilesDir(null)
+        // Seul un sous-dossier dédié est servi : la racine contenait les dumps NFC (clés),
+        // les journaux et le wardriving (GPS), exposés sans authentification sur le LAN.
+        val root = getApplication<Application>().getExternalFilesDir(null)
             ?: getApplication<Application>().filesDir
+        val base = File(root, "served").apply { mkdirs() }
         httpRunning = true
         httpThread = Thread {
             try {
                 val srv = ServerSocket(port)
                 httpServer = srv
-                _httpInfo.value = "http://${localIp()}:$port  (serving ${base.absolutePath})"
-                appendLog("[http server on :$port]")
+                _httpInfo.value = "http://${localIp()}:$port  (serving ${base.absolutePath} — readable by anyone on this network)"
+                appendLog("[http server on :$port, serving only ${base.name}/]")
                 while (httpRunning) {
                     val client = try { srv.accept() } catch (e: Exception) { break }
-                    try { serveHttp(client, base) } catch (_: Exception) {} finally { try { client.close() } catch (_: Exception) {} }
+                    // Un client muet ne doit pas bloquer le serveur indéfiniment.
+                    try { client.soTimeout = 5000; serveHttp(client, base) }
+                    catch (_: Throwable) {}
+                    finally { try { client.close() } catch (_: Exception) {} }
                 }
             } catch (e: Exception) {
                 _httpInfo.value = "HTTP error: ${e.message}"
+                httpRunning = false
             }
         }.apply { start() }
     }
@@ -173,8 +181,11 @@ class NetcatViewModel(app: Application) : AndroidViewModel(app) {
         val decoded = java.net.URLDecoder.decode(path, "UTF-8").removePrefix("/")
         val target = File(base, decoded)
         val out = client.getOutputStream()
-        // Empêche la traversée de répertoire hors de base.
-        if (!target.canonicalPath.startsWith(base.canonicalPath)) {
+        // Empêche la traversée de répertoire hors de base (y compris un dossier frère
+        // dont le nom commence pareil, ex. "served2").
+        val basePath = base.canonicalPath
+        val targetPath = target.canonicalPath
+        if (targetPath != basePath && !targetPath.startsWith(basePath + File.separator)) {
             out.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n".toByteArray()); return
         }
         if (target.isDirectory || decoded.isEmpty()) {
@@ -182,23 +193,29 @@ class NetcatViewModel(app: Application) : AndroidViewModel(app) {
             val items = dir.listFiles()?.sortedBy { it.name } ?: emptyList()
             val html = StringBuilder("<html><body><h3>${dir.name.ifEmpty { "/" }}</h3><ul>")
             items.forEach {
-                val href = "/" + it.relativeTo(base).path + (if (it.isDirectory) "/" else "")
-                html.append("<li><a href=\"$href\">${it.name}${if (it.isDirectory) "/" else " (${it.length()} B)"}</a></li>")
+                val rel = it.relativeTo(base).path.split(File.separatorChar)
+                    .joinToString("/") { seg -> java.net.URLEncoder.encode(seg, "UTF-8").replace("+", "%20") }
+                val href = "/" + rel + (if (it.isDirectory) "/" else "")
+                html.append("<li><a href=\"$href\">${escapeHtml(it.name)}${if (it.isDirectory) "/" else " (${it.length()} B)"}</a></li>")
             }
             html.append("</ul></body></html>")
             val bytes = html.toString().toByteArray()
             out.write(("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n").toByteArray())
             out.write(bytes)
         } else if (target.isFile) {
-            val bytes = target.readBytes()
-            out.write(("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n").toByteArray())
-            out.write(bytes)
-            appendLog("[http] served ${target.name} (${bytes.size} B) to ${client.inetAddress?.hostAddress}")
+            // Flux continu : readBytes() d'un gros fichier provoquait un OutOfMemoryError.
+            val size = target.length()
+            out.write(("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: $size\r\nConnection: close\r\n\r\n").toByteArray())
+            target.inputStream().use { it.copyTo(out) }
+            appendLog("[http] served ${target.name} ($size B) to ${client.inetAddress?.hostAddress}")
         } else {
             out.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n".toByteArray())
         }
         out.flush()
     }
+
+    private fun escapeHtml(v: String) = v.replace("&", "&amp;").replace("<", "&lt;")
+        .replace(">", "&gt;").replace("\"", "&quot;")
 
     private fun localIp(): String {
         try {

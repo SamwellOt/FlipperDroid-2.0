@@ -5,11 +5,15 @@ import androidx.lifecycle.viewModelScope
 import com.example.flipperdroid.iot.IotDevice
 import com.example.flipperdroid.iot.IotProtocolScanner
 import com.example.flipperdroid.util.AppLog
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class IotProtocolScannerViewModel : ViewModel() {
 
@@ -28,23 +32,33 @@ class IotProtocolScannerViewModel : ViewModel() {
     private val _targetRange = MutableStateFlow("192.168.1.1-254")
     val targetRange: StateFlow<String> = _targetRange
 
+    /** Job du scan en cours ; annulé par [stopScan]. */
+    private var scanJob: Job? = null
+
+    private fun timestamp(pattern: String): String =
+        SimpleDateFormat(pattern, Locale.US).format(Date())
+
     fun addLog(message: String) {
-        val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
-        val newLog = "[$timestamp] $message\n" + _scanLog.value
+        val newLog = "[${timestamp("HH:mm:ss")}] $message\n" + _scanLog.value
         _scanLog.value = newLog.take(5000)
         AppLog.log("IotScanner", message)
     }
 
     fun startScan(mode: String = "common", range: String = "") {
-        if (_isScanning.value) return
+        if (_isScanning.value || scanJob?.isActive == true) return
 
-        viewModelScope.launch {
-            _isScanning.value = true
-            _discoveredDevices.value = emptyList()
+        val scanRange = if (range.isNotEmpty()) range else _targetRange.value
+        if (IotProtocolScanner.parseIpRange(scanRange).isEmpty()) {
+            addLog("Invalid target range: $scanRange")
+            return
+        }
 
-            val scanRange = if (range.isNotEmpty()) range else _targetRange.value
-            addLog("Starting $mode scan on $scanRange")
+        _isScanning.value = true
+        _discoveredDevices.value = emptyList()
+        addLog("Starting $mode scan on $scanRange")
 
+        // LAZY : le Job est enregistré avant de démarrer, pour que le bloc finally le reconnaisse.
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
                 val devices = when (mode) {
                     "mqtt" -> {
@@ -67,23 +81,32 @@ class IotProtocolScannerViewModel : ViewModel() {
                 devices.forEach { device ->
                     addLog("Found: ${device.protocol} on ${device.address}:${device.port} (${device.service})")
                 }
-
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 addLog("Scan error: ${e.message}")
             } finally {
-                _isScanning.value = false
+                // Ne réinitialise l'état que si ce scan est encore le scan courant.
+                if (scanJob === coroutineContext[Job]) {
+                    scanJob = null
+                    _isScanning.value = false
+                }
             }
         }
+        scanJob = job
+        job.start()
     }
 
     fun scanMqttTopics(brokerIp: String) {
         viewModelScope.launch {
-            addLog("Scanning MQTT topics on $brokerIp...")
+            addLog("Listening for MQTT topics on $brokerIp (2 s, SUBSCRIBE #)...")
             try {
                 val topics = IotProtocolScanner.scanMqttTopics(brokerIp)
-                addLog("MQTT topics discovered: ${topics.size}")
-                topics.forEach { topic ->
-                    addLog("  - $topic")
+                if (topics.isEmpty()) {
+                    addLog("No PUBLISH seen in 2 s (broker silent, or ACL denies '#')")
+                } else {
+                    addLog("MQTT topics observed: ${topics.size}")
+                    topics.forEach { topic -> addLog("  - $topic") }
                 }
             } catch (e: Exception) {
                 addLog("Topic scan error: ${e.message}")
@@ -117,6 +140,8 @@ class IotProtocolScannerViewModel : ViewModel() {
     }
 
     fun stopScan() {
+        scanJob?.cancel()
+        scanJob = null
         _isScanning.value = false
         addLog("Scan stopped")
     }
@@ -131,7 +156,7 @@ class IotProtocolScannerViewModel : ViewModel() {
         val sb = StringBuilder()
         sb.append("IoT Protocol Scan Results\n")
         sb.append("=========================\n")
-        sb.append("Timestamp: ${LocalDateTime.now()}\n")
+        sb.append("Timestamp: ${timestamp("yyyy-MM-dd HH:mm:ss")}\n")
         sb.append("Discovered Devices: ${_discoveredDevices.value.size}\n\n")
 
         _discoveredDevices.value.groupBy { it.protocol }.forEach { (protocol, devices) ->

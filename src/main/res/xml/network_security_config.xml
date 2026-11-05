@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Les caméras IP (ONVIF/SOAP) et les équipements LAN audités ne parlent que HTTP
+     en clair sur le réseau local. Android bloque le cleartext par défaut depuis
+     API 28 ; une config réseau ne sait pas cibler une plage CIDR, on l'autorise donc
+     globalement. Les appels Internet de l'app n'utilisent pas HTTP en clair. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

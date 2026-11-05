@@ -31,6 +31,8 @@ class HidKeyboardViewModel : ViewModel() {
     private var hidDevice: BluetoothHidDevice? = null
     private var host: BluetoothDevice? = null
     private var registered = false
+    // Un seul exécuteur réutilisé (auparavant un pool neuf, jamais fermé, à chaque enregistrement).
+    private val callbackExecutor = Executors.newSingleThreadExecutor()
 
     private val _status = MutableStateFlow("Not registered")
     val status: StateFlow<String> = _status
@@ -86,10 +88,12 @@ class HidKeyboardViewModel : ViewModel() {
 
     fun initialize(context: Context) {
         this.context = context.applicationContext
-        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        adapter = manager.adapter
+        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        adapter = manager?.adapter
+        if (adapter == null) { _status.value = "Bluetooth not available on this device"; return }
         try {
-            adapter?.getProfileProxy(context, serviceListener, BluetoothProfile.HID_DEVICE)
+            // Contexte applicatif : le proxy le garde jusqu'à closeProfileProxy().
+            adapter?.getProfileProxy(context.applicationContext, serviceListener, BluetoothProfile.HID_DEVICE)
         } catch (e: Exception) {
             _status.value = "HID profile unavailable: ${e.message}"
         }
@@ -106,7 +110,7 @@ class HidKeyboardViewModel : ViewModel() {
                 BluetoothHidDevice.SUBCLASS1_KEYBOARD,
                 hidDescriptor
             )
-            hid.registerApp(sdp, null, null, Executors.newCachedThreadPool(), hidCallback)
+            hid.registerApp(sdp, null, null, callbackExecutor, hidCallback)
             _status.value = "Registering HID app..."
         } catch (e: Exception) {
             _status.value = "registerApp failed: ${e.message}"
@@ -152,5 +156,6 @@ class HidKeyboardViewModel : ViewModel() {
             unregister()
             adapter?.closeProfileProxy(BluetoothProfile.HID_DEVICE, hidDevice)
         } catch (_: Exception) {}
+        callbackExecutor.shutdown()
     }
 }

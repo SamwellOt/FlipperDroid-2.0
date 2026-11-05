@@ -12,13 +12,11 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.flipperdroid.util.WifiChannels
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.BufferedReader
-import java.io.InputStreamReader
 
 /** Un réseau observé pour l'analyseur de canaux. */
 data class WifiAp(
@@ -30,9 +28,14 @@ data class WifiAp(
     val band: String
 )
 
+private val MAC_REGEX = Regex("^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
+
+/** Nom d'interface Linux valide (évite toute injection dans la commande root). */
+private val IFACE_REGEX = Regex("^[A-Za-z0-9._-]{1,15}$")
+
 /**
  * Analyseur Wi-Fi : scanne les réseaux et agrège l'occupation par canal
- * (2.4 / 5 GHz). Inclut un outil de spoofing MAC (root).
+ * (2.4 / 5 / 6 GHz). Inclut un outil de spoofing MAC (root).
  */
 class WifiAnalyzerViewModel : ViewModel() {
 
@@ -52,7 +55,8 @@ class WifiAnalyzerViewModel : ViewModel() {
 
     fun initialize(context: Context) {
         this.context = context.applicationContext
-        wifiManager = context.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        wifiManager = context.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        if (wifiManager == null) _status.value = "Wi-Fi service unavailable"
         checkPermissions()
         registerReceiver()
     }
@@ -78,8 +82,10 @@ class WifiAnalyzerViewModel : ViewModel() {
     fun scan() {
         checkPermissions()
         if (!_permissionsGranted.value) { _status.value = "Location permission required"; return }
+        val wifi = wifiManager
+        if (wifi == null) { _status.value = "Wi-Fi service unavailable"; return }
         try {
-            wifiManager?.startScan()
+            wifi.startScan()
             processResults() // affiche les résultats en cache immédiatement
         } catch (e: Exception) {
             _status.value = "Scan error: ${e.message}"
@@ -90,15 +96,16 @@ class WifiAnalyzerViewModel : ViewModel() {
     private fun processResults() {
         try {
             val results = wifiManager?.scanResults ?: return
-            val aps = results.filter { !it.BSSID.isNullOrEmpty() }.map {
-                val ch = frequencyToChannel(it.frequency)
+            val aps = results.mapNotNull { r ->
+                val bssid: String = r.BSSID?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+                val ssid: String = r.SSID?.takeIf { it.isNotEmpty() } ?: "<Hidden>"
                 WifiAp(
-                    ssid = if (it.SSID.isNullOrEmpty()) "<Hidden>" else it.SSID,
-                    bssid = it.BSSID,
-                    rssi = it.level,
-                    channel = ch,
-                    frequency = it.frequency,
-                    band = if (it.frequency >= 4900) "5 GHz" else "2.4 GHz"
+                    ssid = ssid,
+                    bssid = bssid,
+                    rssi = r.level,
+                    channel = WifiChannels.frequencyToChannel(r.frequency),
+                    frequency = r.frequency,
+                    band = WifiChannels.band(r.frequency)
                 )
             }.sortedByDescending { it.rssi }
             _aps.value = aps
@@ -119,23 +126,24 @@ class WifiAnalyzerViewModel : ViewModel() {
      * @param mac au format AA:BB:CC:DD:EE:FF ; vide = MAC aléatoire.
      */
     fun spoofMac(mac: String, iface: String = "wlan0") {
+        if (!IFACE_REGEX.matches(iface)) { _status.value = "Invalid interface name"; return }
         viewModelScope.launch(Dispatchers.IO) {
             val target = if (mac.isBlank()) randomMac() else mac.trim()
-            if (!Regex("^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$").matches(target)) {
-                withContext(Dispatchers.Main) { _status.value = "Invalid MAC format" }
+            if (!MAC_REGEX.matches(target)) {
+                _status.value = "Invalid MAC format"
                 return@launch
             }
-            val cmd = "ip link set $iface down && ip link set $iface address $target && ip link set $iface up"
+            // L'interface est remise UP dans tous les cas, même si le changement d'adresse échoue.
+            val cmd = "ip link set $iface down; ip link set $iface address $target; r=\$?; " +
+                "ip link set $iface up; exit \$r"
             try {
-                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-                val err = BufferedReader(InputStreamReader(process.errorStream)).readText()
+                val process = ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start()
+                val output = process.inputStream.bufferedReader().use { it.readText() }
                 val code = process.waitFor()
-                withContext(Dispatchers.Main) {
-                    _status.value = if (code == 0) "MAC set to $target on $iface"
-                    else "MAC spoof failed (root? iface?): ${err.take(120)}"
-                }
+                _status.value = if (code == 0) "MAC set to $target on $iface"
+                else "MAC spoof failed (root? iface?), interface re-enabled: ${output.take(120)}"
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) { _status.value = "MAC spoof error: ${e.message}" }
+                _status.value = "MAC spoof error: ${e.message}"
                 Log.e("WifiAnalyzer", "spoofMac", e)
             }
         }
@@ -146,12 +154,6 @@ class WifiAnalyzerViewModel : ViewModel() {
         java.security.SecureRandom().nextBytes(b)
         b[0] = ((b[0].toInt() and 0xFE) or 0x02).toByte() // locally administered, unicast
         return b.joinToString(":") { "%02X".format(it) }
-    }
-
-    private fun frequencyToChannel(freq: Int): Int = when {
-        freq in 2412..2484 -> if (freq == 2484) 14 else (freq - 2412) / 5 + 1
-        freq in 5170..5825 -> (freq - 5170) / 5 + 34
-        else -> 0
     }
 
     override fun onCleared() {

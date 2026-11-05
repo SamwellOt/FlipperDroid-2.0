@@ -17,6 +17,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import com.example.flipperdroid.infrared.IrProtocols
 import com.example.flipperdroid.viewmodel.IrToolsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -33,6 +34,8 @@ fun IrToolsScreen(
     var addressHex by remember { mutableStateOf("04") }
     var delayMs by remember { mutableStateOf(300f) }
     val protocols = listOf("NEC", "NECext", "Samsung32", "SIRC", "RC5", "Kaseikyo")
+    // Adresse hexadécimale saisie (préfixe 0x accepté) ; null si invalide.
+    val addressValue = IrProtocols.parseHexAddress(addressHex)
 
     Scaffold(
         topBar = {
@@ -169,9 +172,13 @@ fun IrToolsScreen(
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = addressHex,
-                        onValueChange = { addressHex = it.filter { c -> c.isLetterOrDigit() }.take(4) },
-                        label = { Text("Address (hex)") },
+                        onValueChange = { addressHex = it.filter { c -> c.isLetterOrDigit() }.take(6) },
+                        label = { Text("Address (hex, 0x optional)") },
                         singleLine = true,
+                        isError = addressValue == null,
+                        supportingText = {
+                            if (addressValue == null) Text("Invalid hex address — sweep disabled")
+                        },
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                             keyboardType = KeyboardType.Ascii
                         ),
@@ -199,10 +206,12 @@ fun IrToolsScreen(
                     Spacer(Modifier.height(12.dp))
                     Button(
                         onClick = {
-                            val addr = addressHex.toIntOrNull(16) ?: 0
-                            viewModel.bruteForce(protocol, addr, 0, 255, delayMs.toLong())
+                            // Adresse invalide : le bouton est désactivé (jamais d'adresse 0 silencieuse).
+                            addressValue?.let { addr ->
+                                viewModel.bruteForce(protocol, addr, 0, 255, delayMs.toLong())
+                            }
                         },
-                        enabled = !running,
+                        enabled = !running && addressValue != null,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.Search, contentDescription = null)

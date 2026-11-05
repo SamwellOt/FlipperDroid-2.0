@@ -164,11 +164,15 @@ class LogicUnitTest {
     @Test
     fun ir_burst_sony_repeats_full_frame_at_least_3x() {
         // Sony SIRC DOIT être émis >=3 fois ; la rafale répète la trame complète.
+        // La trame SIRC finit sur un space : l'intervalle inter-trame se fusionne dans ce space
+        // (un élément ajouté ferait basculer les répétitions d'un mark à un space).
         val (_, base) = IrProtocols.encode("SIRC", 0x01, 0x15)!!
         val (freq, burst) = IrProtocols.encodePowerBurst("SIRC", 0x01, 0x15)!!
         assertEquals(40000, freq)
-        assertEquals(base.size + 2 * (1 + base.size), burst.size)   // 3 trames complètes
-        for (i in base.indices) assertEquals(base[i], burst[i])
+        assertEquals(3 * base.size, burst.size)   // 3 trames complètes, intervalles fusionnés
+        for (i in 0 until base.size - 1) assertEquals(base[i], burst[i])
+        assertEquals(base.last() + 24000, burst[base.size - 1])   // espace final + intervalle
+        assertEquals(base[0], burst[base.size])   // la 2e trame recommence par son mark d'en-tête
     }
 
     @Test

@@ -30,7 +30,9 @@ import com.example.flipperdroid.viewmodel.BleGattFuzzerViewModel
 @Composable
 fun BleGattFuzzerScreen(navController: NavController) {
     val context = LocalContext.current
-    val viewModel: BleGattFuzzerViewModel = viewModel { BleGattFuzzerViewModel(context) }
+    // Contexte applicatif : le ViewModel survit à l'activité (rotation), il ne doit pas la retenir.
+    val appContext = context.applicationContext
+    val viewModel: BleGattFuzzerViewModel = viewModel { BleGattFuzzerViewModel(appContext) }
 
     val isFuzzing by viewModel.isFuzzing.collectAsState()
     val log by viewModel.log.collectAsState()
@@ -104,7 +106,7 @@ fun BleGattFuzzerScreen(navController: NavController) {
                 ) {
                     Button(
                         onClick = {
-                            viewModel.startFuzzing(android.bluetooth.BluetoothAdapter.getDefaultAdapter()!!.bondedDevices.firstOrNull() ?: return@Button)
+                            viewModel.startFirstBondedDevice()
                         },
                         modifier = Modifier.weight(1f),
                         enabled = !isFuzzing && permissionsGranted
@@ -168,11 +170,11 @@ fun BleGattFuzzerScreen(navController: NavController) {
                             style = MaterialTheme.typography.titleSmall
                         )
                         Text(
-                            "• Connects to bonded BLE devices\n" +
-                            "• Discovers all GATT services/characteristics\n" +
-                            "• Writes malformed payloads (overflow, injection, etc)\n" +
-                            "• Captures responses and potential crashes\n" +
-                            "• Logs all interactions for analysis",
+                            "• Uses the FIRST bonded (paired) device — pair the target first\n" +
+                            "• Discovers GATT services/characteristics\n" +
+                            "• Submits malformed payloads to writable characteristics\n" +
+                            "• Logs whether the Android stack accepted each write request\n" +
+                            "• Does NOT analyse device responses: watch the target yourself",
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(top = 8.dp)
                         )

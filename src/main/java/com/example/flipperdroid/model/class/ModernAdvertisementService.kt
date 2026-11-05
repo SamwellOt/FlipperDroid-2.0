@@ -175,7 +175,16 @@ class ModernAdvertisementService(
                     }
                 }
             }
-            override fun onAdvertisingDataSet(advertisingSet: AdvertisingSet, status: Int) {}
+            override fun onAdvertisingDataSet(advertisingSet: AdvertisingSet, status: Int) {
+                // Le contrôleur peut refuser une mise à jour (ex. données > 31 octets sur un
+                // set legacy) : on le remonte au lieu de laisser croire à un envoi réussi.
+                if (status != ADVERTISE_SUCCESS) {
+                    val err = if (status == ADVERTISE_FAILED_DATA_TOO_LARGE)
+                        AdvertisementError.ADVERTISE_FAILED_DATA_TOO_LARGE
+                    else AdvertisementError.ADVERTISE_FAILED_UNKNOWN
+                    _advertisementServiceCallbacks.map { it.onAdvertisementSetFailed(_currentAdvertisementSet, err) }
+                }
+            }
             override fun onScanResponseDataSet(advertisingSet: AdvertisingSet, status: Int) {}
             override fun onAdvertisingSetStopped(advertisingSet: AdvertisingSet) {
                 _runningSet = null

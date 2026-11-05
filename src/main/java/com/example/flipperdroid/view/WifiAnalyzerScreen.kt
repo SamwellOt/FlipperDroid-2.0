@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import com.example.flipperdroid.util.WifiChannels
 import com.example.flipperdroid.viewmodel.WifiAnalyzerViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -38,7 +39,11 @@ fun WifiAnalyzerScreen(
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { viewModel.checkPermissions() }
+    ) {
+        viewModel.checkPermissions()
+        // Permission fraîchement accordée : lancer le scan immédiatement.
+        if (viewModel.permissionsGranted.value) viewModel.scan()
+    }
 
     LaunchedEffect(Unit) {
         viewModel.initialize(context)
@@ -85,11 +90,21 @@ fun WifiAnalyzerScreen(
             if (status.isNotEmpty()) Text(status, style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.height(8.dp))
 
+            val usage24 = viewModel.channelUsage("2.4 GHz")
+            val usage5 = viewModel.channelUsage("5 GHz")
+            val usage6 = viewModel.channelUsage("6 GHz")
+
             Text("2.4 GHz channels (1–14)", style = MaterialTheme.typography.titleSmall)
-            ChannelChart(viewModel.channelUsage("2.4 GHz"), 1..14)
+            ChannelChart(usage24, WifiChannels.STANDARD_2_4_GHZ)
             Spacer(Modifier.height(12.dp))
             Text("5 GHz channels", style = MaterialTheme.typography.titleSmall)
-            ChannelChart(viewModel.channelUsage("5 GHz"), 34..165)
+            // Axe : canaux standard + canaux réellement observés (pas tous les entiers).
+            ChannelChart(usage5, (WifiChannels.STANDARD_5_GHZ + usage5.keys).distinct().sorted())
+            if (usage6.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                Text("6 GHz channels (observed only)", style = MaterialTheme.typography.titleSmall)
+                ChannelChart(usage6, usage6.keys.sorted())
+            }
 
             Spacer(Modifier.height(12.dp))
             // Outil root : spoof MAC
@@ -121,7 +136,7 @@ fun WifiAnalyzerScreen(
 }
 
 @Composable
-private fun ChannelChart(usage: Map<Int, Int>, range: IntRange) {
+private fun ChannelChart(usage: Map<Int, Int>, channels: List<Int>) {
     val max = (usage.values.maxOrNull() ?: 1).coerceAtLeast(1)
     val barColor = MaterialTheme.colorScheme.primary
     Canvas(
@@ -130,7 +145,6 @@ private fun ChannelChart(usage: Map<Int, Int>, range: IntRange) {
             .height(90.dp)
             .padding(vertical = 8.dp)
     ) {
-        val channels = range.toList()
         if (channels.isEmpty()) return@Canvas
         val slot = size.width / channels.size
         val barWidth = slot * 0.6f

@@ -67,13 +67,13 @@ class SkimmerDetectorViewModel : ViewModel() {
         private val SUSPICIOUS_NAMES = listOf(
             "hc-05", "hc-06", "hc05", "hc06", "linvor", "jdy-31", "jdy-30",
             "jdy-33", "bt04", "spp-ca", "bolutek", "h-c-2010", "skimmer",
-            "rnbt", "itead", "csr", "at-09", "mlt-bt05", "zs-040"
+            "rnbt", "itead", "at-09", "mlt-bt05", "zs-040"
         )
         // Préfixes MAC (OUI) fréquents des clones HC-05/HC-06 (en minuscule)
         private val SUSPICIOUS_OUIS = listOf(
             "00:14:03", "98:d3:31", "98:d3:32", "98:d3:33", "98:d3:34",
             "98:d3:35", "98:d3:36", "88:25:83", "00:18:e4", "00:1d:a5",
-            "8c:de:52", "20:16:", "00:15:83", "00:21:13"
+            "8c:de:52", "00:15:83", "00:21:13"
         )
 
         fun evaluate(name: String?, address: String): Pair<Boolean, String> {
@@ -91,8 +91,9 @@ class SkimmerDetectorViewModel : ViewModel() {
 
     fun initialize(context: Context) {
         this.context = context.applicationContext
-        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        bluetoothAdapter = manager.adapter
+        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        bluetoothAdapter = manager?.adapter
+        if (bluetoothAdapter == null) _status.value = "Bluetooth not available on this device."
         bleScanner = bluetoothAdapter?.bluetoothLeScanner
         checkPermissions()
     }

@@ -60,16 +60,9 @@ data class WifiNetwork(
             )
         }
 
-        fun frequencyToChannel(frequency: Int): Int {
-            return when {
-                // Canal 14 (Japon) est un cas particulier : 2484 MHz, hors de la
-                // grille régulière espacée de 5 MHz (2412..2472 = canaux 1..13).
-                frequency == 2484 -> 14
-                frequency in 2412..2472 -> (frequency - 2412) / 5 + 1
-                frequency in 5170..5825 -> (frequency - 5170) / 5 + 34
-                else -> 0
-            }
-        }
+        /** Délègue au calcul unique (2.4 / 5 / 6 GHz) de [com.example.flipperdroid.util.WifiChannels]. */
+        fun frequencyToChannel(frequency: Int): Int =
+            com.example.flipperdroid.util.WifiChannels.frequencyToChannel(frequency)
     }
 }
 
@@ -129,8 +122,9 @@ class WifiDeautherViewModel : ViewModel() {
      */
 
     fun initialize(context: Context) {
-        this.context = context
-        wifiManager = context.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        // Contexte applicatif : ce ViewModel vit dans MainActivity et survit aux recréations.
+        this.context = context.applicationContext
+        wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
         setupScanReceiver()
         checkPermissions()
     }
@@ -372,9 +366,11 @@ class WifiDeautherViewModel : ViewModel() {
 
             var rounds = 0
             while (isActive && _isDeauthing.value) {
-                runRootCommand(command)
+                val rc = runRootCommand(command)
                 rounds++
-                _deauthStatus.value = "Deauth burst #$rounds sent to ${network.bssid} via $tool"
+                // Statut honnête : un code de sortie non nul signifie que l'outil a échoué.
+                _deauthStatus.value = if (rc == 0) "Burst #$rounds: $tool exited OK"
+                    else "Burst #$rounds: $tool failed (exit $rc) — interface not in monitor mode?"
                 delay(1000)
             }
         }

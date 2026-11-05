@@ -75,7 +75,7 @@ fun CryptoToolsScreen(navController: NavController) {
             )
             OutlinedTextField(
                 value = key, onValueChange = { key = it },
-                label = { Text("Key (for HMAC)") }, singleLine = true, modifier = Modifier.fillMaxWidth()
+                label = { Text("Key (HMAC; prefix hex: for hex key)") }, singleLine = true, modifier = Modifier.fillMaxWidth()
             )
             ops.chunked(3).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

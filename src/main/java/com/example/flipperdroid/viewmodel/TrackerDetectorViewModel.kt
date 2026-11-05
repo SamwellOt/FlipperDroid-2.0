@@ -114,8 +114,9 @@ class TrackerDetectorViewModel : ViewModel() {
                 if (s.startsWith("0000feed") || s.startsWith("0000feec")) return "Tile"
             }
         }
-        // Samsung : manufacturer 0x0075 (SmartThings/SmartTag).
-        if (record.getManufacturerSpecificData(0x0075) != null) return "Samsung (SmartTag?)"
+        // Le seul identifiant fabricant 0x0075 (Samsung) n'est PAS retenu : téléphones,
+        // montres et écouteurs Samsung l'émettent aussi (faux positifs massifs). Le
+        // SmartTag est reconnu par son UUID de service 0xFD5A ci-dessus.
         return null
     }
 

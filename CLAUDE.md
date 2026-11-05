@@ -14,7 +14,8 @@ FlipperDroid is a single-module Android app (Kotlin + Jetpack Compose) that turn
 - **IP cameras** — ONVIF discovery (WS-Discovery multicast) + `/24` camera-port scan with a vendor heuristic, RTSP `OPTIONS` auth probe, **default-credential audit** (dictionary over ONVIF `GetDeviceInformation` with WS-UsernameToken, same idea as the NFC key dictionary), and **PTZ control** (ONVIF `ContinuousMove`/`Stop`). Pure SOAP/RTSP/parsing core lives in `camera/OnvifTools.kt` (JVM-testable).
 - **Infrared** — a simple universal remote **and** an `.ir` code-database remote (NEC/NECext/Samsung32/SIRC/RC5/JVC/Kaseikyo/Apple/Coolix), importing Flipper-IRDB `.ir` files + power sweep.
 - **BadUSB** — legacy USB-Host attempt **and** a real **USB Gadget** version (root, writes HID reports to `/dev/hidgX`) with a DuckyScript parser.
-- **Skimmer detector**, **QR scanner** (camera), **password generator** (SecureRandom), **2FA/TOTP vault** (RFC 6238), **Flipper file viewer** (`.nfc`/`.sub`/`.ir`), central **Logs**, **Settings**, About.
+- **Bluetooth Classic** (scan, SDP, SPP terminal), **Tracker detector** (AirTag/SmartTag/Tile), **GATT fuzzer**, **NDEF emulator** + **Card Emulation** (HCE replay of a captured ISO-DEP dialogue), **LAN discovery** (mDNS/SSDP), **Netcat/HTTP**, **Packet sniffer** (root + tcpdump, not bundled), **IoT scanner** (MQTT/CoAP), **GPS spoof** (mock provider), **AC control**, **IR tools** (TV-B-Gone, brute-forcer), **Crypto tools**, **Wi-Fi QR**, **Default creds**, **Report generator**.
+- **Skimmer detector**, **QR scanner** (camera), **password generator** (SecureRandom), **2FA/TOTP vault** (RFC 6238/4226, SHA1/256/512, encrypted), **Flipper file viewer** (`.nfc`/`.sub`/`.ir`), central **Logs**, **Settings**, About.
 
 Several modules require **root** and specific hardware (rooted Pixel 7 on LineageOS is the reference target). The guiding principle when extending: **be honest about capability** — most modules check for root/emitter/tooling and report clearly instead of silently doing nothing (see the Wi-Fi deauther and BadUSB-root as the pattern).
 
@@ -37,7 +38,8 @@ Run a single unit test class/method:
 ./gradlew testDebugUnitTest --tests "com.example.flipperdroid.LogicUnitTest.totp_rfc6238_vectors"
 ```
 
-- **`LogicUnitTest`** (`src/test`) covers the pure-logic cores (IR encoders, `.ir`/`.nfc`/`.sub` parsers, TOTP, DuckyScript keycodes, Mifare hex, Wi-Fi channel math, skimmer heuristic). Prefer adding tests here — it runs without a device or the full Android SDK.
+- **JVM tests** (`src/test`): `LogicUnitTest` plus per-area files (`IrLogicTest`, `NfcLogicTest`, `NetLogicTest`, `TotpReportTest`, `ShellArgsTest`) cover the pure-logic cores. Keep that logic free of `android.*` imports (pattern: `camera/OnvifTools.kt`, `nfc/Type4Responder`, `util/ShellArgs`). `unitTests.isReturnDefaultValues = true` is set, but don't rely on it.
+- `java.time` is available on `minSdk` 24 through core-library desugaring (`desugar_jdk_libs`). `Process.waitFor(timeout, unit)` is NOT (API 26): poll `exitValue()` instead.
 - SDK: `compileSdk`/`targetSdk` 35, `minSdk` 24, JVM target 11. `applicationId`/`namespace` = `com.example.flipperdroid` (still the default — change before shipping).
 - `local.properties` must point at a local Android SDK (`sdk.dir`).
 - Dependency versions are split: some come from the version catalog (`gradle/libs.versions.toml`, `libs.*`) and some are hardcoded inline in `build.gradle.kts` (lifecycle, navigation-compose, material-icons-extended, `com.google.zxing:core`, `com.journeyapps:zxing-android-embedded`). When bumping versions, check both places.
@@ -61,7 +63,7 @@ Package layout under `src/main/java/com/example/flipperdroid/`:
 - `infrared/` — protocol-agnostic IR: `IrProtocols` (encoders → µs patterns for `ConsumerIrManager`), `IrFile` (Flipper `.ir` parser, parsed + raw). Bundled remotes live in `assets/infrared/*.ir`.
 - `flipper/` — `FlipperNfc` / `FlipperSub` readers-writers for Flipper `.nfc` / `.sub` files.
 - `security/` — `TotpGenerator` (RFC 6238 TOTP + Base32).
-- `util/` — `AppLog`, the app-wide log surfaced by `LogsScreen`.
+- `util/` — `AppLog` (app-wide log surfaced by `LogsScreen`; never log secrets or captured credentials into it), `SecureStore` (Keystore AES-GCM for secrets: TOTP vault, captured APDUs), `SecureFlag.SecureWindow()` (FLAG_SECURE on sensitive screens), `ShellArgs` (quoting/validation for every `su -c` command), `WifiChannels` (single 2.4/5/6 GHz channel table).
 - `ui/theme/` — `FlipperDroidTheme`; dark mode is a runtime toggle driven by `ThemeViewModel.isDarkMode` (persisted).
 
 ### BLE advertisement engine (`model/`)
@@ -69,7 +71,8 @@ Package layout under `src/main/java/com/example/flipperdroid/`:
 
 ### Root & native code
 Root-dependent modules shell out through `su -c` and **report honestly when root/tooling is missing**:
-- **Network tools** ship a prebuilt `nmap` + `.so`s in `assets/nmap/`; at runtime copied to `/data/local/tmp/`, `chmod 755`, then run with `LD_LIBRARY_PATH`/`RESOLV_CONF`/`NSSWITCH_CONF`.
+- **Every `su -c` string must be built with `ShellArgs`** (quote user/network data, validate hosts/interfaces/MACs). Unquoted concatenation previously allowed root command injection.
+- **Network tools** ship a prebuilt `nmap` + `.so`s in `assets/nmap/`; installed once into `/data/local/tmp/flipperdroid/` (`NetworkToolsViewModel.NMAP_DIR`), then run with `LD_LIBRARY_PATH`/`RESOLV_CONF`/`NSSWITCH_CONF` under a 120 s timeout. Options are filtered by `ShellArgs.splitSafeOptions` (no `-o*`, `-i*`, `--script`). The "traceroute" is honestly a TCP reachability probe.
 - **Wi-Fi deauth** checks for root + an injection tool (`aireplay-ng`/`mdk4`) and explains that most phone Wi-Fi chipsets can't do monitor-mode/injection.
 - **MAC spoof** uses `ip link set … address …`.
 - **BadUSB (root gadget)** requires a kernel HID gadget at `/dev/hidgX`; it opens `su -c "cat > /dev/hidgX"` and streams 8-byte HID reports built by the DuckyScript engine (`RootBadUsbViewModel.charToKeycode` is the shared US-keyboard map, reused by the BLE HID keyboard).
@@ -83,4 +86,6 @@ Root-dependent modules shell out through `su -c` and **report honestly when root
 - BroadcastReceivers register for **protected system broadcasts** (Wi-Fi scan results, Bluetooth `ACTION_FOUND`), so they don't need the `RECEIVER_EXPORTED` flag even on target 35.
 - Assets under `src/main/assets/` (`nmap/` binaries, `infrared/*.ir`, `legacy/*.txt` legal texts) are loaded by path at runtime — keep paths in sync with the code.
 - `NfcViewModel` keeps the last `Tag` so dictionary-attack / NDEF-write / UID-clone work after a scan; NFC I/O runs on `Dispatchers.IO` (blocking calls would ANR on the main thread).
+- Backups are disabled (`allowBackup="false"`, plus exclusions in `res/xml/`). Cleartext HTTP is allowed app-wide by `res/xml/network_security_config.xml` because ONVIF/LAN devices only speak plain HTTP.
+- Releases are built by CI only on `v*` tags and signed from repository secrets (`RELEASE_KEYSTORE_BASE64`, …); never publish the debug APK.
 - This is offensive-security tooling for **authorized testing/research only** (see README + in-app legal gate). Keep that framing, and keep the honest-capability-check pattern when adding radio features a phone can't really do.

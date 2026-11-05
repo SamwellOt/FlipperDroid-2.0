@@ -24,6 +24,36 @@ data class PowerCode(
  * (voir IrToolsViewModel.tvBGone).
  */
 object PowerCodes {
+
+    /** Marqueurs d'une paire on/off explicite dans un nom de bouton. */
+    private val PAIR_MARKERS = listOf("_on", "_off", " on", " off")
+
+    /**
+     * Vrai si le nom désigne un bouton "power" **bascule** : contient "power" et n'est pas
+     * une paire explicite on/off (Power_on, Power off…). Émettre les deux rallumerait un
+     * appareil qu'on vient d'éteindre.
+     */
+    fun isPowerToggleName(name: String): Boolean {
+        val n = name.lowercase()
+        if (!n.contains("power")) return false
+        return PAIR_MARKERS.none { n.contains(it) }
+    }
+
+    /**
+     * Clé d'unicité d'un bouton : (protocole, adresse, commande) pour un bouton "parsed",
+     * contenu de la capture pour un bouton "raw".
+     */
+    fun buttonKey(b: IrButton): String =
+        if (b.type.equals("parsed", ignoreCase = true)) {
+            "P|${b.protocol?.uppercase()?.replace("_", "")}|${b.address}|${b.command}"
+        } else {
+            "R|${b.frequency}|${b.rawData?.joinToString(",")}"
+        }
+
+    /** Boutons power bascule, sans doublon sur [buttonKey] (ordre conservé). */
+    fun distinctPowerToggles(buttons: List<IrButton>): List<IrButton> =
+        buttons.filter { isPowerToggleName(it.name) }.distinctBy { buttonKey(it) }
+
     val EXTRA: List<PowerCode> = listOf(
         // --- Samsung : 0x07/0x02 = trame E0E040BF (universel TV Samsung) ---
         PowerCode("Samsung", "Samsung32", 0x07, 0x02),

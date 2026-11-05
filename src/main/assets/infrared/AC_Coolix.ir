@@ -27,9 +27,3 @@ type: parsed
 protocol: Coolix
 address: 00 00 00 00
 command: A5 F5 B5 00
-#
-name: Led
-type: parsed
-protocol: Coolix
-address: 00 00 00 00
-command: A5 F5 B5 00
