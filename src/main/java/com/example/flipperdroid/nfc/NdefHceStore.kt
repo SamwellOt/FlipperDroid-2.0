@@ -4,6 +4,12 @@ import android.content.Context
 
 /** Persiste le message NDEF (octets) servi par [NdefHceService] et son libellé. */
 object NdefHceStore {
+    /**
+     * Taille maximale d'un message NDEF servi : le fichier NDEF annoncé dans le CC fait 1024 octets
+     * (0x0400), NLEN (2 octets) compris.
+     */
+    const val MAX_MESSAGE_BYTES = 1022
+
     private const val PREFS = "ndef_hce"
     private const val KEY_NDEF = "ndef_hex"
     private const val KEY_LABEL = "label"

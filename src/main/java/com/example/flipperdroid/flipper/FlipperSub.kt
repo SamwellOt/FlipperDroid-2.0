@@ -6,7 +6,9 @@ data class SubFile(
     val preset: String?,
     val protocol: String?,
     val rawData: IntArray,
-    val keyData: String?
+    val keyData: String?,
+    /** false si l'en-tête "Filetype: Flipper ..." est absent (fichier probablement non conforme). */
+    val valid: Boolean = true
 )
 
 /**
@@ -23,6 +25,7 @@ object FlipperSub {
         var preset: String? = null
         var protocol: String? = null
         var keyData: String? = null
+        var hasHeader = false
         val raw = mutableListOf<Int>()
 
         for (line in text.split("\n")) {
@@ -32,6 +35,7 @@ object FlipperSub {
             val key = t.substring(0, idx).trim()
             val value = t.substring(idx + 1).trim()
             when {
+                key.equals("Filetype", true) -> hasHeader = value.contains("Flipper", ignoreCase = true)
                 key.equals("Frequency", true) -> frequency = value.toLongOrNull()
                 key.equals("Preset", true) -> preset = value
                 key.equals("Protocol", true) -> protocol = value
@@ -40,7 +44,7 @@ object FlipperSub {
                     value.split(Regex("\\s+")).mapNotNullTo(raw) { it.toIntOrNull() }
             }
         }
-        return SubFile(frequency, preset, protocol, raw.toIntArray(), keyData)
+        return SubFile(frequency, preset, protocol, raw.toIntArray(), keyData, hasHeader)
     }
 
     /** Résumé lisible d'un .sub. */

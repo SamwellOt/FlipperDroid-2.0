@@ -41,7 +41,9 @@ fun FlipperFilesScreen(navController: NavController) {
                 }
                 val name = uri.lastPathSegment?.substringAfterLast('/') ?: "file"
                 fileName = name
-                summary = if (text == null) "Could not read file." else summarize(name, text)
+                // Analyse hors du thread principal (fichiers potentiellement volumineux).
+                summary = if (text == null) "Could not read file."
+                else withContext(Dispatchers.Default) { summarize(name, text) }
             }
         }
     }
@@ -75,9 +77,9 @@ fun FlipperFilesScreen(navController: NavController) {
                 Spacer(Modifier.width(8.dp))
                 Text("Open file")
             }
-            if (fileName != null) {
+            fileName?.let { name ->
                 Spacer(Modifier.height(16.dp))
-                Text(fileName!!, fontWeight = FontWeight.Bold)
+                Text(name, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
                 Text(summary, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
             }
@@ -90,15 +92,27 @@ private fun summarize(name: String, text: String): String {
         name.endsWith(".nfc", true) -> {
             val c = FlipperNfc.parse(text)
             buildString {
+                if (!c.valid) append("WARNING: no 'Filetype: Flipper NFC' header, format not verified.\n\n")
                 append("Type: ${c.deviceType ?: "?"}\n")
                 append("UID: ${c.uid ?: "?"}\n")
                 append("ATQA: ${c.atqa ?: "?"}  SAK: ${c.sak ?: "?"}\n")
-                append("Blocks: ${c.blocks.size}\n\n")
-                c.blocks.take(16).forEachIndexed { i, b -> append("Block $i: $b\n") }
-                if (c.blocks.size > 16) append("...")
+                if (c.pages.isNotEmpty()) {
+                    // NTAG / Ultralight : lignes "Page i:"
+                    append("Pages: ${c.pages.size}\n\n")
+                    c.pages.take(16).forEachIndexed { i, p -> append("Page $i: $p\n") }
+                    if (c.pages.size > 16) append("...")
+                } else {
+                    append("Blocks: ${c.blocks.size}\n\n")
+                    c.blocks.take(16).forEachIndexed { i, b -> append("Block $i: $b\n") }
+                    if (c.blocks.size > 16) append("...")
+                }
             }
         }
-        name.endsWith(".sub", true) -> FlipperSub.summarize(FlipperSub.parse(text))
+        name.endsWith(".sub", true) -> {
+            val sub = FlipperSub.parse(text)
+            val warning = if (sub.valid) "" else "WARNING: no 'Filetype: Flipper' header, format not verified.\n\n"
+            warning + FlipperSub.summarize(sub)
+        }
         name.endsWith(".ir", true) -> {
             val buttons = IrFile.parse(text)
             "IR remote: ${buttons.size} buttons\n\n" +

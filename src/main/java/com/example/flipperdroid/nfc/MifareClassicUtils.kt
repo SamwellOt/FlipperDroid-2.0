@@ -2,8 +2,6 @@ package com.example.flipperdroid.nfc
 
 import android.nfc.Tag
 import android.nfc.tech.MifareClassic
-import android.util.Log
-import java.io.IOException
 
 object MifareClassicUtils {
     const val NO_DATA = "--------------------------------"
@@ -29,46 +27,47 @@ object MifareClassicUtils {
         return bytes.joinToString("") { "%02X".format(it) }
     }
 
+    /**
+     * Convertit une chaîne hexadécimale en octets (sans séparateurs).
+     * @return null si la longueur est impaire ou si un caractère n'est pas hexadécimal ;
+     *   une chaîne vide donne un tableau vide. Fonction pure (testable hors Android).
+     */
     fun hexToBytes(hex: String): ByteArray? {
         if (hex.length % 2 != 0) return null
-        return try {
-            hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-        } catch (e: Exception) {
-            Log.d("Debug","Error to convert hex to byte: ${e.message}")
-            null
+        val out = ByteArray(hex.length / 2)
+        for (i in out.indices) {
+            val hi = hexDigit(hex[2 * i])
+            val lo = hexDigit(hex[2 * i + 1])
+            if (hi < 0 || lo < 0) return null
+            out[i] = ((hi shl 4) or lo).toByte()
         }
+        return out
     }
 
-
-    fun readSector(tag: Tag, sectorIndex: Int, key: ByteArray, useAsKeyB: Boolean): List<String>? {
-        val mfc = MifareClassic.get(tag) ?: return null
-        try {
-            mfc.connect()
-            val auth = if (useAsKeyB) mfc.authenticateSectorWithKeyB(sectorIndex, key)
-            else mfc.authenticateSectorWithKeyA(sectorIndex, key)
-            if (!auth) return null
-            val firstBlock = mfc.sectorToBlock(sectorIndex)
-            val blockCount = mfc.getBlockCountInSector(sectorIndex)
-            val blocks = mutableListOf<String>()
-            for (i in 0 until blockCount) {
-                try {
-                    val blockBytes = mfc.readBlock(firstBlock + i)
-                    blocks.add(bytesToHex(blockBytes))
-                } catch (e: IOException) {
-                    blocks.add(NO_DATA)
-                }
-            }
-            return blocks
-        } catch (e: Exception) {
-            return null
-        } finally {
-            try { mfc.close() } catch (_: Exception) {}
-        }
+    /** Valeur d'un chiffre hexadécimal, ou -1 si le caractère n'en est pas un. */
+    private fun hexDigit(c: Char): Int = when (c) {
+        in '0'..'9' -> c - '0'
+        in 'a'..'f' -> c - 'a' + 10
+        in 'A'..'F' -> c - 'A' + 10
+        else -> -1
     }
 
-    fun writeBlock(tag: Tag, sectorIndex: Int, blockIndex: Int, data: ByteArray, key: ByteArray, useAsKeyB: Boolean): Boolean {
+    /**
+     * Écrit un bloc. Les "sector trailers" (dernier bloc du secteur : clés + bits d'accès)
+     * sont refusés sauf si [allowTrailer] est vrai : un mauvais trailer verrouille le secteur.
+     */
+    fun writeBlock(
+        tag: Tag,
+        sectorIndex: Int,
+        blockIndex: Int,
+        data: ByteArray,
+        key: ByteArray,
+        useAsKeyB: Boolean,
+        allowTrailer: Boolean = false
+    ): Boolean {
         val mfc = MifareClassic.get(tag) ?: return false
         try {
+            if (!allowTrailer && blockIndex == mfc.getBlockCountInSector(sectorIndex) - 1) return false
             mfc.connect()
             val auth = if (useAsKeyB) mfc.authenticateSectorWithKeyB(sectorIndex, key)
             else mfc.authenticateSectorWithKeyA(sectorIndex, key)

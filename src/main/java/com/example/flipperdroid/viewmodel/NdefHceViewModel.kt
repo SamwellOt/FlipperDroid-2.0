@@ -20,19 +20,27 @@ class NdefHceViewModel(app: Application) : AndroidViewModel(app) {
     fun setUri(uri: String) {
         try {
             val msg = NdefMessage(arrayOf(NdefRecord.createUri(uri)))
-            NdefHceStore.save(getApplication<Application>(), "URI: $uri", msg.toByteArray())
-            _label.value = "URI: $uri"
-            _status.value = "Ready. Hold another phone/reader (reader mode) to this one."
+            store(msg, "URI: $uri")
         } catch (e: Exception) { _status.value = "Error: ${e.message}" }
     }
 
     fun setText(text: String) {
         try {
             val msg = NdefMessage(arrayOf(NdefRecord.createTextRecord("en", text)))
-            NdefHceStore.save(getApplication<Application>(), "Text: $text", msg.toByteArray())
-            _label.value = "Text: $text"
-            _status.value = "Ready. Hold another phone/reader (reader mode) to this one."
+            store(msg, "Text: $text")
         } catch (e: Exception) { _status.value = "Error: ${e.message}" }
+    }
+
+    /** Enregistre le message si sa taille tient dans le fichier NDEF émulé (1022 octets max). */
+    private fun store(msg: NdefMessage, label: String) {
+        val bytes = msg.toByteArray()
+        if (bytes.size > NdefHceStore.MAX_MESSAGE_BYTES) {
+            _status.value = "Message too large: ${bytes.size} bytes (maximum ${NdefHceStore.MAX_MESSAGE_BYTES})."
+            return
+        }
+        NdefHceStore.save(getApplication<Application>(), label, bytes)
+        _label.value = label
+        _status.value = "Ready. Hold another phone/reader (reader mode) to this one."
     }
 
     fun clear() {
