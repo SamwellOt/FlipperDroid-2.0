@@ -137,11 +137,11 @@ class MainActivity : ComponentActivity() {
      * Intercepte l'intent NFC, récupère le tag détecté, extrait son identifiant,
      * puis le transmet au ViewModel pour traitement.
      *
-     * @param intent l'Intent reçue par l'activité (peut être null).
+     * @param intent l'Intent reçue par l'activité.
      */
-    override fun onNewIntent(intent: Intent?) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        intent?.let {
+        intent.let {
             handleNfcIntent(intent)
 
             // Handle USB connection

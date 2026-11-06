@@ -670,8 +670,8 @@ class NfcViewModel(app: Application) : AndroidViewModel(app) {
         val b0 = dump.getOrNull(0)?.let { MifareClassicUtils.hexToBytes(it.replace(" ", "")) }
             ?: return "unknown"
         if (b0.size < 5) return MifareClassicUtils.bytesToHex(b0)
-        val bcc = b0[0] xor b0[1] xor b0[2] xor b0[3]
-        if (b0[4] == bcc) return MifareClassicUtils.bytesToHex(b0.copyOfRange(0, 4))
+        val bcc = (b0[0].toInt() xor b0[1].toInt() xor b0[2].toInt() xor b0[3].toInt()) and 0xFF
+        if ((b0[4].toInt() and 0xFF) == bcc) return MifareClassicUtils.bytesToHex(b0.copyOfRange(0, 4))
         if (b0.size < 8) return MifareClassicUtils.bytesToHex(b0.copyOfRange(0, minOf(7, b0.size)))
         return MifareClassicUtils.bytesToHex(b0.copyOfRange(0, 3) + b0.copyOfRange(4, 8))
     }
