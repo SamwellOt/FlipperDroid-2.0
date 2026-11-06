@@ -40,10 +40,16 @@ class LanDiscoveryViewModel(app: Application) : AndroidViewModel(app) {
         "_workstation._tcp.", "_smb._tcp.", "_afpovertcp._tcp.", "_ftp._tcp."
     )
 
+    /** Protégé par synchronized(listeners). */
     private val listeners = mutableListOf<NsdManager.DiscoveryListener>()
+    /** Protégé par synchronized(this) (méthodes @Synchronized). */
     private val resolveQueue = ArrayDeque<NsdServiceInfo>()
     private var resolving = false
 
+    /**
+     * Services découverts. Écrit par les callbacks NSD, la boucle SSDP (IO) et les
+     * bannières (IO) : tout accès passe par synchronized(map).
+     */
     private val map = LinkedHashMap<String, LanService>()
 
     private val _services = MutableStateFlow<List<LanService>>(emptyList())
@@ -57,7 +63,7 @@ class LanDiscoveryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun start() {
         if (_isScanning.value) return
-        map.clear(); _services.value = emptyList()
+        synchronized(map) { map.clear(); emit() }
         _isScanning.value = true
         _status.value = "Discovering (mDNS + SSDP)…"
         startMdns()
@@ -66,9 +72,15 @@ class LanDiscoveryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun stop() {
         _isScanning.value = false
-        listeners.forEach { try { nsd?.stopServiceDiscovery(it) } catch (_: Exception) {} }
-        listeners.clear()
-        _status.value = "Stopped. ${map.size} services."
+        val toStop = synchronized(listeners) {
+            val copy = listeners.toList()
+            listeners.clear()
+            copy
+        }
+        toStop.forEach { try { nsd?.stopServiceDiscovery(it) } catch (_: Exception) {} }
+        synchronized(this) { resolveQueue.clear() }
+        val count = synchronized(map) { map.size }
+        _status.value = "Stopped. $count services."
     }
 
     private fun startMdns() {
@@ -84,7 +96,7 @@ class LanDiscoveryViewModel(app: Application) : AndroidViewModel(app) {
             }
             try {
                 manager.discoverServices(type, NsdManager.PROTOCOL_DNS_SD, listener)
-                listeners.add(listener)
+                synchronized(listeners) { listeners.add(listener) }
             } catch (_: Exception) {}
         }
     }
@@ -129,9 +141,11 @@ class LanDiscoveryViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun startSsdp() {
         viewModelScope.launch(Dispatchers.IO) {
+            var socket: DatagramSocket? = null
             try {
-                val socket = DatagramSocket()
-                socket.soTimeout = 4000
+                val s = DatagramSocket()
+                socket = s
+                s.soTimeout = 4000
                 val query = (
                     "M-SEARCH * HTTP/1.1\r\n" +
                         "HOST: 239.255.255.250:1900\r\n" +
@@ -140,11 +154,11 @@ class LanDiscoveryViewModel(app: Application) : AndroidViewModel(app) {
                         "ST: ssdp:all\r\n\r\n"
                     ).toByteArray()
                 val group = InetAddress.getByName("239.255.255.250")
-                socket.send(DatagramPacket(query, query.size, group, 1900))
+                s.send(DatagramPacket(query, query.size, group, 1900))
                 val buf = ByteArray(2048)
                 while (true) {
                     val packet = DatagramPacket(buf, buf.size)
-                    try { socket.receive(packet) } catch (e: Exception) { break }
+                    try { s.receive(packet) } catch (e: Exception) { break }
                     val resp = String(packet.data, 0, packet.length)
                     val server = headerOf(resp, "SERVER")
                     val location = headerOf(resp, "LOCATION")
@@ -160,11 +174,14 @@ class LanDiscoveryViewModel(app: Application) : AndroidViewModel(app) {
                         )
                     )
                 }
-                socket.close()
             } catch (e: Exception) {
                 _status.value = "SSDP error: ${e.message}"
             } finally {
-                if (_isScanning.value) _status.value = "Found ${map.size} services."
+                // Socket fermé dans tous les cas (y compris en cas d'erreur d'envoi).
+                socket?.close()
+                if (_isScanning.value) {
+                    _status.value = "Found ${synchronized(map) { map.size }} services."
+                }
             }
         }
     }
@@ -172,34 +189,48 @@ class LanDiscoveryViewModel(app: Application) : AndroidViewModel(app) {
     /** Récupère une bannière (HTTP/SSH/FTP…) sur host:port. */
     fun grabBanner(host: String, port: Int) {
         viewModelScope.launch(Dispatchers.IO) {
-            val banner = try {
-                Socket().use { s ->
-                    s.connect(InetSocketAddress(host, port), 3000)
-                    s.soTimeout = 3000
-                    // HTTP : provoque une réponse ; sinon on lit ce que le service envoie.
-                    if (port == 80 || port == 8080 || port == 443 || port == 8000) {
-                        s.getOutputStream().write("HEAD / HTTP/1.0\r\nHost: $host\r\n\r\n".toByteArray())
-                        s.getOutputStream().flush()
+            val banner = if (port == 443) {
+                // Port TLS : une requête HTTP en clair n'a pas de sens, on ne sonde pas.
+                "TLS — not probed"
+            } else {
+                try {
+                    Socket().use { s ->
+                        s.connect(InetSocketAddress(host, port), 3000)
+                        s.soTimeout = 3000
+                        // HTTP : provoque une réponse ; sinon on lit ce que le service envoie.
+                        if (port == 80 || port == 8080 || port == 8000) {
+                            s.getOutputStream().write("HEAD / HTTP/1.0\r\nHost: $host\r\n\r\n".toByteArray())
+                            s.getOutputStream().flush()
+                        }
+                        val buf = ByteArray(512)
+                        val n = try { s.getInputStream().read(buf) } catch (_: Exception) { -1 }
+                        if (n > 0) String(buf, 0, n).trim() else "(no banner)"
                     }
-                    val buf = ByteArray(512)
-                    val n = try { s.getInputStream().read(buf) } catch (_: Exception) { -1 }
-                    if (n > 0) String(buf, 0, n).trim() else "(no banner)"
-                }
-            } catch (e: Exception) { "banner error: ${e.message}" }
+                } catch (e: Exception) { "banner error: ${e.message}" }
+            }
             val key = "$host:$port"
-            map.entries.firstOrNull { it.value.host == host && it.value.port == port }?.let {
-                map[it.key] = it.value.copy(banner = banner.take(300))
-            } ?: run { map[key + ":banner"] = LanService(key, host, port, "banner", "", banner.take(300)) }
-            emit()
+            synchronized(map) {
+                val existing = map.entries.firstOrNull { it.value.host == host && it.value.port == port }
+                if (existing != null) {
+                    map[existing.key] = existing.value.copy(banner = banner.take(300))
+                } else {
+                    map[key + ":banner"] = LanService(key, host, port, "banner", "", banner.take(300))
+                }
+                emit()
+            }
             _status.value = "Banner $host:$port grabbed."
         }
     }
 
+    /** Ajoute un service si absent. */
     private fun addService(s: LanService) {
         val key = "${s.source}:${s.host}:${s.port}:${s.label}"
-        if (!map.containsKey(key)) { map[key] = s; emit() }
+        synchronized(map) {
+            if (!map.containsKey(key)) { map[key] = s; emit() }
+        }
     }
 
+    /** Publie la liste triée. À appeler avec le verrou sur [map] tenu. */
     private fun emit() {
         _services.value = map.values.sortedWith(compareBy({ it.host }, { it.port }))
     }

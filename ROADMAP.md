@@ -29,7 +29,7 @@ e propostas de novas funcionalidades, com avaliação **honesta** da viabilidade
 - Permissões novas no manifesto: `TRANSMIT_IR`, `CAMERA`.
 
 ### Nota sobre build/SDK
-Não há Android SDK utilizável neste ambiente (só um stub Debian), então **não foi possível compilar o app aqui**. O código foi validado por inspeção; os algoritmos críticos (encoder NEC, TOTP) foram cross-validados em Python. Rode na sua máquina (SDK em `/home/archiznoo/Android/Sdk`):
+A CI (GitHub Actions) compila, roda os testes JVM e o lint a cada push/PR. Localmente, aponte `local.properties` para o seu Android SDK (`sdk.dir`) e rode:
 - `./gradlew testDebugUnitTest` — roda os testes unitários (não precisa de device).
 - `./gradlew assembleDebug` — compila o APK.
 

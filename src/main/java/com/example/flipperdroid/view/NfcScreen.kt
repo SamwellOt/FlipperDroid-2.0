@@ -1,5 +1,10 @@
 package com.example.flipperdroid.view
 
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.nfc.NfcAdapter
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -7,6 +12,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -21,6 +29,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.example.flipperdroid.viewmodel.NfcViewModel
+
+/** Ouvre les réglages NFC du système (ignoré si l'appareil n'en fournit pas). */
+private fun openNfcSettings(context: Context) {
+    try {
+        context.startActivity(Intent(Settings.ACTION_NFC_SETTINGS))
+    } catch (e: ActivityNotFoundException) {
+        // Aucun écran de réglages NFC sur cet appareil : rien à ouvrir.
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,16 +58,31 @@ fun NfcScreen(
     val tagInfo by nfcViewModel.tagInfo.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // État de l'adaptateur NFC, relu à chaque retour sur l'écran (après passage dans les réglages).
+    val nfcAdapter = remember { NfcAdapter.getDefaultAdapter(context) }
+    var nfcEnabled by remember { mutableStateOf(nfcAdapter?.isEnabled == true) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) nfcEnabled = nfcAdapter?.isEnabled == true
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             scope.launch {
-                val name = uri.lastPathSegment ?: ""
+                val name = (uri.lastPathSegment ?: "").lowercase()
                 val bytes = withContext(Dispatchers.IO) {
                     try { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } } catch (e: Exception) { null }
                 }
                 if (bytes != null) {
-                    val looksText = name.endsWith(".mct", true) || name.endsWith(".txt", true) ||
-                        bytes.take(16).all { (it.toInt() and 0xFF) in 9..126 }
+                    // Extension d'abord ; l'heuristique de contenu ne sert qu'en repli.
+                    val looksText = when {
+                        name.endsWith(".mct") || name.endsWith(".txt") -> true
+                        name.endsWith(".bin") || name.endsWith(".mfd") -> false
+                        else -> bytes.take(16).all { (it.toInt() and 0xFF) in 9..126 }
+                    }
                     if (looksText) nfcViewModel.importMct(String(bytes)) else nfcViewModel.importBin(bytes)
                 }
             }
@@ -88,6 +120,22 @@ fun NfcScreen(
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
+            // Bandeau : NFC absent ou désactivé
+            if (nfcAdapter == null || !nfcEnabled) {
+                Card(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(
+                            if (nfcAdapter == null) "NFC is not available on this device."
+                            else "NFC is turned off. Turn it on to read or write tags.",
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Button(onClick = { openNfcSettings(context) }, Modifier.padding(top = 8.dp)) {
+                            Text("Open NFC settings")
+                        }
+                    }
+                }
+            }
             // Section Lecture
             Card(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
                 Column(Modifier.padding(16.dp)) {

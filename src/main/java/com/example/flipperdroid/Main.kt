@@ -100,14 +100,13 @@ class MainActivity : ComponentActivity() {
                 IntentFilter(NfcAdapter.ACTION_TECH_DISCOVERED)
             )
 
-            // Setup tech lists for all NFC tech types
+            // Chaque sous-tableau est un ET logique ; la liste externe est un OU.
+            // Une entrée par technologie = « n'importe quelle tag NFC-A/B/F/V ».
             techListsArray = arrayOf(
-                arrayOf(
-                    NfcA::class.java.name,
-                    NfcB::class.java.name,
-                    NfcF::class.java.name,
-                    NfcV::class.java.name
-                )
+                arrayOf(NfcA::class.java.name),
+                arrayOf(NfcB::class.java.name),
+                arrayOf(NfcF::class.java.name),
+                arrayOf(NfcV::class.java.name)
             )
         }
 
@@ -123,7 +122,13 @@ class MainActivity : ComponentActivity() {
                 AppNavigation(themeViewModel)
             }
         }
-        handleNfcIntent(intent)
+        // Une recréation (rotation…) relivre la même Intent de lancement : on ne la
+        // traite qu'au premier onCreate, puis on la consomme. Sinon un clone armé
+        // pourrait se déclencher sur une tag « fantôme » sans nouveau passage.
+        if (savedInstanceState == null) {
+            handleNfcIntent(intent)
+            setIntent(Intent())
+        }
     }
 
     /**
@@ -132,19 +137,19 @@ class MainActivity : ComponentActivity() {
      * Intercepte l'intent NFC, récupère le tag détecté, extrait son identifiant,
      * puis le transmet au ViewModel pour traitement.
      *
-     * @param intent l'Intent reçue par l'activité (peut être null).
+     * @param intent l'Intent reçue par l'activité.
      */
-    override fun onNewIntent(intent: Intent?) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        intent?.let {
+        intent.let {
             handleNfcIntent(intent)
 
             // Handle USB connection
             if (intent.action == UsbManager.ACTION_USB_DEVICE_ATTACHED) {
                 val device: UsbDevice? =
                     intent.parcelableExtraCompat(UsbManager.EXTRA_DEVICE)
-                val usbManager = getSystemService(USB_SERVICE) as UsbManager
-                device?.let { dev ->
+                val usbManager = getSystemService(USB_SERVICE) as? UsbManager
+                if (usbManager != null) device?.let { dev ->
                     if (usbManager.hasPermission(dev)) {
                         val connection = usbManager.openDevice(dev)
                         if (connection != null) {
@@ -184,6 +189,7 @@ class MainActivity : ComponentActivity() {
      */
     override fun onResume() {
         super.onResume()
+        applyKeepScreenOn()
         // Enable foreground dispatch only if NFC is available and enabled
         nfcAdapter?.let { adapter ->
             if (adapter.isEnabled) {
@@ -195,6 +201,13 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    /** Applique le réglage « garder l'écran allumé » (SettingsScreen) à toute l'activité. */
+    private fun applyKeepScreenOn() {
+        val keep = getSharedPreferences("app_settings", MODE_PRIVATE).getBoolean("keepScreenOn", false)
+        if (keep) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
     /**
@@ -358,14 +371,14 @@ class MainActivity : ComponentActivity() {
             composable("ble_fuzzer") {
                 BleGattFuzzerScreen(navController = navController)
             }
-            composable("nfc_relay") {
-                NfcRelayAttackScreen(navController = navController)
-            }
             composable("packet_sniffer") {
                 PacketSnifferScreen(navController = navController)
             }
             composable("iot_scanner") {
                 IotProtocolScannerScreen(navController = navController)
+            }
+            composable("ip_cameras") {
+                IpCameraScreen(navController = navController)
             }
             composable("report_generator") {
                 ReportGeneratorScreen(navController = navController)

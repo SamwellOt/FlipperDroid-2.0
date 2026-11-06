@@ -128,8 +128,6 @@ fun HomeScreen(
             "Emulate an NFC NDEF tag (HCE Type 4): the phone serves a URL/text when read by an NFC reader or a phone in reader mode."),
         FeatureItem("Card Emulation", Icons.Default.Contactless, "emv_emulation", "NFC & RFID",
             "Emulate a captured ISO-DEP card via HCE (replays its APDU responses). Capture from NFC Reader. Mifare Classic can't be emulated; EMV can't be replayed to pay."),
-        FeatureItem("NFC Relay Attack", Icons.Default.Nfc, "nfc_relay", "NFC & RFID",
-            "Capture and relay NFC/EMV exchanges. Advanced testing for NFC card security."),
 
         // --- Bluetooth & BLE ---
         FeatureItem("BLE Spam", Icons.Default.Bluetooth, "bluetooth", "Bluetooth & BLE",
@@ -168,6 +166,9 @@ fun HomeScreen(
             "Capture and analyze network packets (requires tcpdump + root). Export to CSV."),
         FeatureItem("IoT Scanner", Icons.Default.Scanner, "iot_scanner", "Wi-Fi & Network",
             "Discover MQTT brokers, CoAP servers, and common IoT services on a network."),
+        FeatureItem("IP Cameras", Icons.Default.Videocam, "ip_cameras", "Wi-Fi & Network",
+            "Discover ONVIF cameras (WS-Discovery) or scan a /24 for camera ports, probe RTSP, " +
+                "audit default credentials, and drive PTZ (ONVIF ContinuousMove/Stop). Authorized testing only."),
         FeatureItem("GPS Spoof", Icons.Default.Map, "gps_spoof", "Wi-Fi & Network",
             "Set a fake GPS location via mock location (enable this app in Developer Options → mock location app)."),
 

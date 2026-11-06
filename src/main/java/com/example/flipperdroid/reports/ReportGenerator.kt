@@ -1,11 +1,13 @@
 package com.example.flipperdroid.reports
 
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
+/** Rapport d'audit. Date en [Date] (java.time n'est pas disponible avant API 26). */
 data class PenetrationReport(
     val title: String,
-    val date: LocalDateTime,
+    val date: Date,
     val tester: String,
     val target: String,
     val findings: List<Finding>,
@@ -34,6 +36,17 @@ enum class Severity {
 
 object ReportGenerator {
 
+    private const val DATE_PATTERN = "yyyy-MM-dd HH:mm"
+    private const val ISO_PATTERN = "yyyy-MM-dd'T'HH:mm:ss"
+    private const val ID_PREFIX = "FINDING-"
+
+    /** Caractères Markdown à échapper dans le texte utilisateur. */
+    private const val MARKDOWN_SPECIAL = "\\`*_{}[]()#+-.!|<>~"
+
+    /** Formate une date avec des locales fixes (SimpleDateFormat n'est pas thread-safe : instance locale). */
+    private fun formatDate(date: Date, pattern: String = DATE_PATTERN): String =
+        SimpleDateFormat(pattern, Locale.US).format(date)
+
     private fun escapeHtml(value: String): String = value
         .replace("&", "&amp;")
         .replace("<", "&lt;")
@@ -57,16 +70,65 @@ object ReportGenerator {
         return sb.toString()
     }
 
+    /** CVSS utilisable en sortie : NaN et infini deviennent 0. */
+    internal fun safeCvss(value: Float): Float =
+        if (value.isNaN() || value.isInfinite()) 0f else value
+
+    /**
+     * Échappe les caractères spéciaux Markdown.
+     * @param singleLine si true, les retours à la ligne deviennent des espaces (titres, champs courts).
+     */
+    internal fun escapeMarkdown(value: String, singleLine: Boolean = false): String {
+        val sb = StringBuilder(value.length + 8)
+        for (c in value) {
+            if (singleLine && (c == '\n' || c == '\r')) {
+                sb.append(' ')
+                continue
+            }
+            if (MARKDOWN_SPECIAL.indexOf(c) >= 0) sb.append('\\')
+            sb.append(c)
+        }
+        return sb.toString()
+    }
+
+    /** Clôture de bloc de code : plus longue que toute suite de backticks contenue dans [content]. */
+    internal fun markdownFence(content: String): String {
+        var longest = 0
+        var run = 0
+        for (c in content) {
+            if (c == '`') {
+                run++
+                if (run > longest) longest = run
+            } else {
+                run = 0
+            }
+        }
+        return "`".repeat(maxOf(3, longest + 1))
+    }
+
+    /** Numéro d'un identifiant "FINDING-n", ou null. */
+    internal fun findingNumber(id: String): Int? =
+        if (id.startsWith(ID_PREFIX)) id.substring(ID_PREFIX.length).toIntOrNull() else null
+
+    /**
+     * Prochain numéro de finding : strictement supérieur au maximum déjà utilisé
+     * et au dernier numéro émis, pour ne jamais réutiliser un identifiant supprimé.
+     */
+    internal fun nextFindingNumber(existingIds: Collection<String>, lastIssued: Int): Int =
+        maxOf(lastIssued, existingIds.mapNotNull { findingNumber(it) }.maxOrNull() ?: 0) + 1
+
+    internal fun formatFindingId(number: Int): String = "$ID_PREFIX$number"
+
     fun generateMarkdownReport(report: PenetrationReport): String {
         val sb = StringBuilder()
 
         // Header
         sb.append("# Penetration Test Report\n\n")
         sb.append("## Executive Summary\n")
-        sb.append("**Project:** ${report.title}\n")
-        sb.append("**Date:** ${report.date.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))}\n")
-        sb.append("**Tester:** ${report.tester}\n")
-        sb.append("**Target:** ${report.target}\n\n")
+        sb.append("**Project:** ${escapeMarkdown(report.title, singleLine = true)}\n")
+        sb.append("**Date:** ${formatDate(report.date)}\n")
+        sb.append("**Tester:** ${escapeMarkdown(report.tester, singleLine = true)}\n")
+        sb.append("**Target:** ${escapeMarkdown(report.target, singleLine = true)}\n\n")
 
         // Statistics
         val stats = report.findings.groupingBy { it.severity }.eachCount()
@@ -81,15 +143,18 @@ object ReportGenerator {
         // Findings
         sb.append("## Findings\n\n")
         report.findings.sortedBy { it.severity.ordinal }.forEach { finding ->
-            sb.append("### [${finding.severity}] ${finding.title}\n")
-            sb.append("**ID:** ${finding.id}\n\n")
-            sb.append("**Description:**\n${finding.description}\n\n")
-            sb.append("**Impact:**\n${finding.impact}\n\n")
-            if (finding.cvss > 0f) {
-                sb.append("**CVSS Score:** ${finding.cvss}\n\n")
+            val cvss = safeCvss(finding.cvss)
+            sb.append("### [${finding.severity}] ${escapeMarkdown(finding.title, singleLine = true)}\n")
+            sb.append("**ID:** ${escapeMarkdown(finding.id, singleLine = true)}\n\n")
+            sb.append("**Description:**\n${escapeMarkdown(finding.description)}\n\n")
+            sb.append("**Impact:**\n${escapeMarkdown(finding.impact)}\n\n")
+            if (cvss > 0f) {
+                sb.append("**CVSS Score:** $cvss\n\n")
             }
-            sb.append("**Remediation:**\n${finding.remediation}\n\n")
-            sb.append("**Evidence:**\n```\n${finding.evidence}\n```\n\n")
+            sb.append("**Remediation:**\n${escapeMarkdown(finding.remediation)}\n\n")
+            // Preuve brute : jamais échappée, dans un bloc clôturé par une fence plus longue que son contenu
+            val fence = markdownFence(finding.evidence)
+            sb.append("**Evidence:**\n$fence\n${finding.evidence}\n$fence\n\n")
             sb.append("---\n\n")
         }
 
@@ -97,23 +162,23 @@ object ReportGenerator {
         if (report.recommendations.isNotEmpty()) {
             sb.append("## Recommendations\n\n")
             report.recommendations.forEach { rec ->
-                sb.append("- $rec\n")
+                sb.append("- ${escapeMarkdown(rec, singleLine = true)}\n")
             }
             sb.append("\n")
         }
 
-        // Timeline
+        // Timeline (entrées stockées sans préfixe "- ")
         if (report.timeline.isNotEmpty()) {
             sb.append("## Test Timeline\n\n")
             report.timeline.forEach { event ->
-                sb.append("- $event\n")
+                sb.append("- ${escapeMarkdown(event, singleLine = true)}\n")
             }
             sb.append("\n")
         }
 
         // Footer
         sb.append("---\n")
-        sb.append("_Report generated on ${LocalDateTime.now()}_\n")
+        sb.append("_Report generated on ${formatDate(Date(), "yyyy-MM-dd HH:mm:ss")}_\n")
 
         return sb.toString()
     }
@@ -148,7 +213,7 @@ object ReportGenerator {
             <body>
                 <div class="header">
                     <h1>${escapeHtml(report.title)}</h1>
-                    <p>Date: ${report.date.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))}</p>
+                    <p>Date: ${escapeHtml(formatDate(report.date))}</p>
                     <p>Tester: ${escapeHtml(report.tester)} | Target: ${escapeHtml(report.target)}</p>
                 </div>
         """.trimIndent())
@@ -182,8 +247,9 @@ object ReportGenerator {
                     <p><strong>Impact:</strong> ${escapeHtml(finding.impact)}</p>
             """.trimIndent())
 
-            if (finding.cvss > 0f) {
-                sb.append("<p><strong>CVSS Score:</strong> ${finding.cvss}</p>\n")
+            val cvss = safeCvss(finding.cvss)
+            if (cvss > 0f) {
+                sb.append("<p><strong>CVSS Score:</strong> $cvss</p>\n")
             }
 
             sb.append("<p><strong>Remediation:</strong> ${escapeHtml(finding.remediation)}</p>\n")
@@ -206,9 +272,30 @@ object ReportGenerator {
             sb.append("</ul>\n</div>\n")
         }
 
+        // Timeline
+        if (report.timeline.isNotEmpty()) {
+            sb.append("<div class='section'><h2>Test Timeline</h2>\n<ul>\n")
+            report.timeline.forEach { event ->
+                sb.append("<li>${escapeHtml(event)}</li>\n")
+            }
+            sb.append("</ul>\n</div>\n")
+        }
+
         sb.append("</body>\n</html>")
 
         return sb.toString()
+    }
+
+    /** Écrit un tableau JSON de chaînes indenté de deux espaces (sans virgule finale). */
+    private fun StringBuilder.appendJsonStringArray(key: String, items: List<String>): StringBuilder {
+        append("  \"$key\": [\n")
+        items.forEachIndexed { index, item ->
+            append("    \"${escapeJson(item)}\"")
+            if (index < items.size - 1) append(",")
+            append("\n")
+        }
+        append("  ]")
+        return this
     }
 
     fun generateJsonReport(report: PenetrationReport): String {
@@ -216,7 +303,7 @@ object ReportGenerator {
 
         sb.append("{\n")
         sb.append("  \"title\": \"${escapeJson(report.title)}\",\n")
-        sb.append("  \"date\": \"${escapeJson(report.date.toString())}\",\n")
+        sb.append("  \"date\": \"${escapeJson(formatDate(report.date, ISO_PATTERN))}\",\n")
         sb.append("  \"tester\": \"${escapeJson(report.tester)}\",\n")
         sb.append("  \"target\": \"${escapeJson(report.target)}\",\n")
         sb.append("  \"findings\": [\n")
@@ -230,20 +317,15 @@ object ReportGenerator {
             sb.append("      \"impact\": \"${escapeJson(finding.impact)}\",\n")
             sb.append("      \"remediation\": \"${escapeJson(finding.remediation)}\",\n")
             sb.append("      \"evidence\": \"${escapeJson(finding.evidence)}\",\n")
-            sb.append("      \"cvss\": ${finding.cvss}\n")
+            sb.append("      \"cvss\": ${safeCvss(finding.cvss)}\n")
             sb.append("    }")
             if (index < report.findings.size - 1) sb.append(",")
             sb.append("\n")
         }
 
         sb.append("  ],\n")
-        sb.append("  \"recommendations\": [\n")
-        report.recommendations.forEachIndexed { index, rec ->
-            sb.append("    \"${escapeJson(rec)}\"")
-            if (index < report.recommendations.size - 1) sb.append(",")
-            sb.append("\n")
-        }
-        sb.append("  ]\n")
+        sb.appendJsonStringArray("recommendations", report.recommendations).append(",\n")
+        sb.appendJsonStringArray("timeline", report.timeline).append("\n")
         sb.append("}\n")
 
         return sb.toString()

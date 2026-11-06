@@ -7,7 +7,6 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -35,7 +34,6 @@ import com.example.flipperdroid.viewmodel.*
  * @param navController controleur de navigation pour revenir a l ecran precedent
  * @param viewModel viewmodel contenant les donnees des réseaux et l etat du scan
  */
-@RequiresApi(Build.VERSION_CODES.S)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WifiDeautherScreen(
@@ -305,7 +303,7 @@ fun NetworkCard(
     viewModel: WifiDeautherViewModel
 ) {
     val networkStrength = viewModel.getNetworkStrength(network.rssi)
-    val securityType = viewModel.getSecurityType(network.capabilities)
+    val securityLabel = viewModel.getSecurityLabel(network.capabilities)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -370,7 +368,7 @@ fun NetworkCard(
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = securityType.name,
+                        text = securityLabel,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

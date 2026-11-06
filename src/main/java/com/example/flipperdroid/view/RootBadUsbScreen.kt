@@ -62,7 +62,7 @@ fun RootBadUsbScreen(
 
             Text(
                 "Requires root and a kernel HID gadget (/dev/hidgX). Plug the phone into the target " +
-                    "over USB. Real 802.11-style keystroke injection to the host. Authorized use only.",
+                    "over USB. Real USB HID keystroke injection to the host. Authorized use only.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error
             )

@@ -17,9 +17,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import com.example.flipperdroid.infrared.IrProtocols
 import com.example.flipperdroid.viewmodel.IrToolsViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun IrToolsScreen(
     navController: NavController,
@@ -33,6 +34,8 @@ fun IrToolsScreen(
     var addressHex by remember { mutableStateOf("04") }
     var delayMs by remember { mutableStateOf(300f) }
     val protocols = listOf("NEC", "NECext", "Samsung32", "SIRC", "RC5", "Kaseikyo")
+    // Adresse hexadécimale saisie (préfixe 0x accepté) ; null si invalide.
+    val addressValue = IrProtocols.parseHexAddress(addressHex)
 
     Scaffold(
         topBar = {
@@ -69,8 +72,17 @@ fun IrToolsScreen(
                     Spacer(Modifier.height(4.dp))
                     Text(
                         "Fire every known power code in sequence to switch off any TV, " +
-                            "projector or digital display in range.",
+                            "projector or digital display in range. Each code is sent as a " +
+                            "repeated burst (like a held remote button) so the receiver " +
+                            "actually registers it — a single frame is filtered as noise.",
                         style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Point the phone's IR emitter straight at the TV, ≤ 5 m, and hold " +
+                            "steady until the sweep finishes.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(12.dp))
                     Button(
@@ -83,12 +95,49 @@ fun IrToolsScreen(
                         Text("Fire all power codes")
                     }
                     Spacer(Modifier.height(4.dp))
-                    OutlinedButton(
-                        onClick = { viewModel.tvBGone(rounds = 3) },
-                        enabled = !running,
-                        modifier = Modifier.fillMaxWidth()
+                    Text(
+                        "Power is a toggle: run the sweep once. If a display is still on, " +
+                            "re-aim and fire again — running it back-to-back can toggle a set " +
+                            "you just switched off back on.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // --- Cible précise (une marque à la fois) ---
+            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Target one brand", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "More reliable than the full sweep: pick your TV's brand, aim the " +
+                            "phone's IR emitter carefully, and tap once. It fires just that " +
+                            "power code as a firm held burst — no waiting for the right code " +
+                            "to scroll past. Nothing happened? Re-aim and tap again.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Text("Fire 3× (stubborn displays)")
+                        viewModel.powerBrands.forEach { pc ->
+                            AssistChip(
+                                onClick = { viewModel.fireBrand(pc) },
+                                enabled = !running,
+                                label = { Text(pc.brand) },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.PowerSettingsNew,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -123,9 +172,13 @@ fun IrToolsScreen(
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = addressHex,
-                        onValueChange = { addressHex = it.filter { c -> c.isLetterOrDigit() }.take(4) },
-                        label = { Text("Address (hex)") },
+                        onValueChange = { addressHex = it.filter { c -> c.isLetterOrDigit() }.take(6) },
+                        label = { Text("Address (hex, 0x optional)") },
                         singleLine = true,
+                        isError = addressValue == null,
+                        supportingText = {
+                            if (addressValue == null) Text("Invalid hex address — sweep disabled")
+                        },
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                             keyboardType = KeyboardType.Ascii
                         ),
@@ -153,10 +206,12 @@ fun IrToolsScreen(
                     Spacer(Modifier.height(12.dp))
                     Button(
                         onClick = {
-                            val addr = addressHex.toIntOrNull(16) ?: 0
-                            viewModel.bruteForce(protocol, addr, 0, 255, delayMs.toLong())
+                            // Adresse invalide : le bouton est désactivé (jamais d'adresse 0 silencieuse).
+                            addressValue?.let { addr ->
+                                viewModel.bruteForce(protocol, addr, 0, 255, delayMs.toLong())
+                            }
                         },
-                        enabled = !running,
+                        enabled = !running && addressValue != null,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.Search, contentDescription = null)

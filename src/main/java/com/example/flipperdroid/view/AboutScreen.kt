@@ -82,7 +82,7 @@ fun AboutScreen(navController: NavController) {
 
             item {
                 Text(
-                    "Version 1.0.0",
+                    "Version ${com.example.flipperdroid.BuildConfig.VERSION_NAME}",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onBackground
                 )
@@ -91,7 +91,7 @@ fun AboutScreen(navController: NavController) {
             item {
                 Spacer(modifier = Modifier.height(24.dp))
                 Text(
-                    "FlipperDroid is an Android application that brings some of the Flipper Zero's functionality to your smartphone It provides a set of tools for security research and hardware interaction",
+                    "FlipperDroid is an Android application that brings some of the Flipper Zero's functionality to your smartphone. It provides a set of tools for security research and hardware interaction.",
                     style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onBackground

@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,8 +20,8 @@ import androidx.compose.ui.platform.LocalContext
 /**
  * Affiche l ecran des parametres avec plusieurs sections configurables
  *
- * Cette interface permet de gerer les preferences liees a l apparence aux notifications au retour haptique et sonore ainsi qu au stockage
- * Les options incluent le theme sombre la persistance de l ecran les notifications les vibrations les sons la suppression du cache et l export des donnees
+ * Options : thème sombre, écran toujours allumé (appliqué à toute l'activité, voir
+ * MainActivity.applyKeepScreenOn) et accès aux permissions système.
  *
  * @param navController controleur de navigation permettant de revenir a l ecran precedent
  */
@@ -32,17 +31,14 @@ fun SettingsScreen(navController: NavController, themeViewModel: ThemeViewModel)
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE) }
     val darkMode by themeViewModel.isDarkMode.collectAsState()
-    var notifications by remember { mutableStateOf(prefs.getBoolean("notifications", true)) }
     var keepScreenOn by remember { mutableStateOf(prefs.getBoolean("keepScreenOn", false)) }
-    var vibrationEnabled by remember { mutableStateOf(prefs.getBoolean("vibration", true)) }
-    var soundEnabled by remember { mutableStateOf(prefs.getBoolean("sound", true)) }
 
-    // Applique réellement "garder l'écran allumé" à la fenêtre de l'activité
+    // Le réglage s'applique à la fenêtre de l'activité entière (et au lancement via
+    // MainActivity.onResume), pas seulement tant que cet écran est affiché.
     val activity = context as? android.app.Activity
-    DisposableEffect(keepScreenOn) {
+    LaunchedEffect(keepScreenOn) {
         if (keepScreenOn) activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         else activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        onDispose { }
     }
 
     Scaffold(
@@ -106,15 +102,6 @@ fun SettingsScreen(navController: NavController, themeViewModel: ThemeViewModel)
                     Column {
                         SettingToggle("Keep screen on", "Prevent the screen from sleeping", keepScreenOn) {
                             keepScreenOn = it; prefs.edit().putBoolean("keepScreenOn", it).apply()
-                        }
-                        SettingToggle("Notifications", "Enable in-app notifications", notifications) {
-                            notifications = it; prefs.edit().putBoolean("notifications", it).apply()
-                        }
-                        SettingToggle("Vibration", "Haptic feedback", vibrationEnabled) {
-                            vibrationEnabled = it; prefs.edit().putBoolean("vibration", it).apply()
-                        }
-                        SettingToggle("Sound", "Sound feedback", soundEnabled) {
-                            soundEnabled = it; prefs.edit().putBoolean("sound", it).apply()
                         }
                     }
                 }

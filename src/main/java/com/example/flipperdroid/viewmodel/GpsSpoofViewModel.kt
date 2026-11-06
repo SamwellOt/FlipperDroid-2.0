@@ -19,6 +19,9 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * Faux GPS via mock location. Nécessite d'activer cette app comme « application de
  * localisation fictive » dans Options développeur (pas de root).
+ *
+ * Seul le fournisseur GPS de la plateforme (LocationManager) est simulé : les apps qui
+ * utilisent le Fused Location Provider (Google Play services) peuvent l'ignorer.
  */
 class GpsSpoofViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -31,11 +34,22 @@ class GpsSpoofViewModel(app: Application) : AndroidViewModel(app) {
     val status: StateFlow<String> = _status
 
     private var job: Job? = null
-    private var lat = 0.0
-    private var lon = 0.0
+    @Volatile private var lat = 0.0
+    @Volatile private var lon = 0.0
+
+    /** Retourne un message d'erreur si les coordonnées sont hors bornes (ou NaN), sinon null. */
+    private fun validate(latitude: Double, longitude: Double): String? = when {
+        latitude !in -90.0..90.0 -> "Invalid latitude (must be between -90 and 90)"
+        longitude !in -180.0..180.0 -> "Invalid longitude (must be between -180 and 180)"
+        else -> null
+    }
 
     @Suppress("DEPRECATION")
     fun start(latitude: Double, longitude: Double) {
+        validate(latitude, longitude)?.let { error ->
+            _status.value = error
+            return
+        }
         val manager = lm ?: run { _status.value = "LocationManager unavailable"; return }
         lat = latitude; lon = longitude
         val provider = LocationManager.GPS_PROVIDER
@@ -52,7 +66,8 @@ class GpsSpoofViewModel(app: Application) : AndroidViewModel(app) {
             job?.cancel()
             job = viewModelScope.launch(Dispatchers.IO) {
                 while (isActive) {
-                    pushLocation(manager, provider)
+                    val error = pushLocation(manager, provider)
+                    if (error != null) _status.value = "Mock location push failed: $error"
                     delay(1000)
                 }
             }
@@ -65,22 +80,30 @@ class GpsSpoofViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun update(latitude: Double, longitude: Double) {
+        validate(latitude, longitude)?.let { error ->
+            _status.value = error
+            return
+        }
         lat = latitude; lon = longitude
         if (_active.value) _status.value = "Spoofing GPS to $lat, $lon"
     }
 
-    private fun pushLocation(manager: LocationManager, provider: String) {
-        try {
-            val loc = Location(provider).apply {
-                latitude = lat
-                longitude = lon
-                altitude = 0.0
-                accuracy = 1f
-                time = System.currentTimeMillis()
-                elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
-            }
-            manager.setTestProviderLocation(provider, loc)
-        } catch (_: Exception) {}
+    /** Envoie une position au fournisseur simulé. Retourne null si OK, sinon le message d'erreur. */
+    private fun pushLocation(manager: LocationManager, provider: String): String? = try {
+        val loc = Location(provider).apply {
+            latitude = lat
+            longitude = lon
+            altitude = 0.0
+            accuracy = 1f
+            time = System.currentTimeMillis()
+            elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+        }
+        manager.setTestProviderLocation(provider, loc)
+        null
+    } catch (e: SecurityException) {
+        "not allowed (select this app as mock location app)"
+    } catch (e: Exception) {
+        e.message ?: e.javaClass.simpleName
     }
 
     @Suppress("DEPRECATION")

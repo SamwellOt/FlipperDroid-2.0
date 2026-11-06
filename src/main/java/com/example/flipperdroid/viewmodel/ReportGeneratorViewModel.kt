@@ -10,7 +10,9 @@ import com.example.flipperdroid.util.AppLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import java.time.LocalDateTime
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class ReportGeneratorViewModel : ViewModel() {
 
@@ -29,11 +31,15 @@ class ReportGeneratorViewModel : ViewModel() {
     private val _recommendations = MutableStateFlow<List<String>>(emptyList())
     val recommendations: StateFlow<List<String>> = _recommendations
 
+    /** Entrées de chronologie, sans préfixe (le générateur ajoute la puce). */
     private val _timeline = MutableStateFlow<List<String>>(emptyList())
     val timeline: StateFlow<List<String>> = _timeline
 
     private val _generatedReport = MutableStateFlow<String>("")
     val generatedReport: StateFlow<String> = _generatedReport
+
+    /** Dernier numéro de finding émis : ne redescend jamais, même après suppression. */
+    private var lastFindingNumber = 0
 
     fun addFinding(
         title: String,
@@ -44,7 +50,9 @@ class ReportGeneratorViewModel : ViewModel() {
         evidence: String,
         cvss: Float = 0f
     ) {
-        val id = "FINDING-${_findings.value.size + 1}"
+        val number = ReportGenerator.nextFindingNumber(_findings.value.map { it.id }, lastFindingNumber)
+        lastFindingNumber = number
+        val id = ReportGenerator.formatFindingId(number)
         val finding = Finding(
             id = id,
             title = title,
@@ -71,7 +79,8 @@ class ReportGeneratorViewModel : ViewModel() {
     }
 
     fun addTimelineEvent(event: String) {
-        _timeline.value = _timeline.value + "- ${LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"))} $event"
+        val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+        _timeline.value = _timeline.value + "$time $event"
         AppLog.log("Report", "Timeline event added: $event")
     }
 
@@ -82,59 +91,43 @@ class ReportGeneratorViewModel : ViewModel() {
         AppLog.log("Report", "Report metadata updated")
     }
 
+    /** Instantané des données courantes, daté de maintenant. */
+    private fun snapshot() = PenetrationReport(
+        title = _reportTitle.value,
+        date = Date(),
+        tester = _testerName.value,
+        target = _targetSystem.value,
+        findings = _findings.value,
+        recommendations = _recommendations.value,
+        timeline = _timeline.value
+    )
+
     fun generateMarkdownReport() {
         viewModelScope.launch {
-            val report = PenetrationReport(
-                title = _reportTitle.value,
-                date = LocalDateTime.now(),
-                tester = _testerName.value,
-                target = _targetSystem.value,
-                findings = _findings.value,
-                recommendations = _recommendations.value,
-                timeline = _timeline.value
-            )
-
-            _generatedReport.value = ReportGenerator.generateMarkdownReport(report)
+            _generatedReport.value = ReportGenerator.generateMarkdownReport(snapshot())
             AppLog.log("Report", "Markdown report generated")
         }
     }
 
     fun generateHtmlReport() {
         viewModelScope.launch {
-            val report = PenetrationReport(
-                title = _reportTitle.value,
-                date = LocalDateTime.now(),
-                tester = _testerName.value,
-                target = _targetSystem.value,
-                findings = _findings.value,
-                recommendations = _recommendations.value,
-                timeline = _timeline.value
-            )
-
-            _generatedReport.value = ReportGenerator.generateHtmlReport(report)
+            _generatedReport.value = ReportGenerator.generateHtmlReport(snapshot())
             AppLog.log("Report", "HTML report generated")
         }
     }
 
     fun generateJsonReport() {
         viewModelScope.launch {
-            val report = PenetrationReport(
-                title = _reportTitle.value,
-                date = LocalDateTime.now(),
-                tester = _testerName.value,
-                target = _targetSystem.value,
-                findings = _findings.value,
-                recommendations = _recommendations.value,
-                timeline = _timeline.value
-            )
-
-            _generatedReport.value = ReportGenerator.generateJsonReport(report)
+            _generatedReport.value = ReportGenerator.generateJsonReport(snapshot())
             AppLog.log("Report", "JSON report generated")
         }
     }
 
     fun getReportStats(): Map<String, Any> {
         val severityCounts = _findings.value.groupingBy { it.severity }.eachCount()
+        // Moyenne CVSS : 0.0 si aucun finding (pas de NaN)
+        val cvssValues = _findings.value.map { it.cvss }.filter { it.isFinite() }
+        val avgCvss = if (cvssValues.isEmpty()) 0.0 else cvssValues.average()
         return mapOf(
             "total_findings" to _findings.value.size,
             "critical" to (severityCounts[Severity.CRITICAL] ?: 0),
@@ -143,7 +136,7 @@ class ReportGeneratorViewModel : ViewModel() {
             "low" to (severityCounts[Severity.LOW] ?: 0),
             "info" to (severityCounts[Severity.INFO] ?: 0),
             "recommendations" to _recommendations.value.size,
-            "avg_cvss" to (_findings.value.map { it.cvss }.average())
+            "avg_cvss" to avgCvss
         )
     }
 

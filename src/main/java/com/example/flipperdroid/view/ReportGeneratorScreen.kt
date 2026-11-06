@@ -1,5 +1,6 @@
 package com.example.flipperdroid.view
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -216,6 +217,7 @@ fun BuildTab(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddFindingForm(viewModel: ReportGeneratorViewModel, onDone: () -> Unit) {
     var title by remember { mutableStateOf("") }
@@ -241,19 +243,20 @@ fun AddFindingForm(viewModel: ReportGeneratorViewModel, onDone: () -> Unit) {
                 modifier = Modifier.fillMaxWidth()
             )
 
+            // Noms complets des sévérités (défilement horizontal si l'écran est étroit)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 8.dp),
+                    .padding(top = 8.dp)
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Severity.values().forEach { sev ->
-                    Button(
+                    FilterChip(
+                        selected = severity == sev,
                         onClick = { severity = sev },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(sev.name.take(3), fontSize = MaterialTheme.typography.labelSmall.fontSize)
-                    }
+                        label = { Text(sev.name) }
+                    )
                 }
             }
 

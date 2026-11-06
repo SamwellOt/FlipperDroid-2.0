@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
+import com.example.flipperdroid.util.ShellArgs
 import kotlinx.coroutines.launch
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -31,6 +33,14 @@ data class NetworkResult(
  * via des StateFlow
  */
 class NetworkToolsViewModel : ViewModel() {
+
+    companion object {
+        /** Dossier dédié à l'app dans /data/local/tmp (root) pour nmap et ses .so. */
+        const val NMAP_DIR = "/data/local/tmp/flipperdroid"
+        private const val NMAP_TIMEOUT_MS = 120_000L
+        private const val MAX_PORTS_PER_SCAN = 2048
+    }
+
     private val _results = MutableStateFlow<List<NetworkResult>>(emptyList())
     val results: StateFlow<List<NetworkResult>> = _results
 
@@ -73,43 +83,25 @@ class NetworkToolsViewModel : ViewModel() {
      * @return Chemin absolu du dossier nmap prêt à l'emploi
      */
     fun copyNmapToTmp(context: Context): String {
-        val nmapDir = File("/data/local/tmp")
         val internalNmapDir = File(context.filesDir, "nmap")
-
-        try {
-            // Suppression du dossier
-            if (internalNmapDir.exists()) {
-                Log.d("NMAP_COPY", "Suppression de l'ancien dossier nmap dans ${internalNmapDir.absolutePath}")
-                deleteRecursively(internalNmapDir)
+        return try {
+            // Déjà installé et exécutable : pas de recopie de ~11 Mo à chaque scan.
+            val installed = Runtime.getRuntime().exec(arrayOf("su", "-c", "test -x ${ShellArgs.quote("$NMAP_DIR/nmap")}")).waitFor() == 0
+            if (!installed) {
+                if (internalNmapDir.exists()) deleteRecursively(internalNmapDir)
+                internalNmapDir.mkdirs()
+                copyAssetsRecursively(context, "nmap", internalNmapDir)
+                if (!File(internalNmapDir, "nmap").exists()) return "ERROR : nmap asset missing from the APK"
+                // Sous-dossier dédié : on ne touche plus aux fichiers des autres apps dans /data/local/tmp.
+                val dir = ShellArgs.quote(NMAP_DIR)
+                val cmd = "mkdir -p $dir && cp -r ${ShellArgs.quote(internalNmapDir.absolutePath)}/. $dir/ && chmod 755 $dir $dir/*"
+                val rc = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd)).waitFor()
+                if (rc != 0) return "ERROR : copy to $NMAP_DIR failed (exit $rc)"
             }
-
-            // Créer le dossier interne
-            internalNmapDir.mkdirs()
-
-            Log.d("NMAP_COPY", "Copie depuis assets/nmap/ vers ${internalNmapDir.absolutePath}")
-            copyAssetsRecursively(context, "nmap", internalNmapDir)
-
-            // copie ver /data/local/tmp avec root
-            val copyCmd = "cp -r ${internalNmapDir.absolutePath}/* /data/local/tmp/"
-            val chmodCmd = "chmod -R 755 /data/local/tmp"
-
-            Log.d("NMAP_COPY", "Commande de copie : $copyCmd")
-            val copyResult = Runtime.getRuntime().exec(arrayOf("su", "-c", copyCmd)).waitFor()
-            Log.d("NMAP_COPY", "Résultat de la copie : $copyResult")
-
-            Log.d("NMAP_COPY", "Commande chmod : $chmodCmd")
-            val chmodResult = Runtime.getRuntime().exec(arrayOf("su", "-c", chmodCmd)).waitFor()
-            Log.d("NMAP_COPY", "Résultat du chmod : $chmodResult")
-
-
             createMissingConfigFiles()
-
-            if (!File("/data/local/tmp/nmap").exists()) throw Exception("Le binaire nmap n'a pas été copié dans /data/local/tmp/")
-
-            return nmapDir.absolutePath
+            NMAP_DIR
         } catch (e: Exception) {
-            //Log.e("NMAP_COPY", "Erreur : ${e.message}")
-            return "ERROR : ${e.message}"
+            "ERROR : ${e.message}"
         }
     }
 
@@ -152,7 +144,7 @@ class NetworkToolsViewModel : ViewModel() {
                 nameserver 8.8.4.4
             """.trimIndent()
 
-            val resolvCmd = "echo '$resolvContent' > /data/local/tmp/resolv.conf"
+            val resolvCmd = "printf '%s\\n' ${ShellArgs.quote(resolvContent)} > ${ShellArgs.quote("$NMAP_DIR/resolv.conf")}"
             Runtime.getRuntime().exec(arrayOf("su", "-c", resolvCmd)).waitFor()
             //Log.d("NMAP_COPY", "Fichier resolv.conf créé")
 
@@ -164,7 +156,7 @@ class NetworkToolsViewModel : ViewModel() {
                 rpc:        files
             """.trimIndent()
 
-            val nsswitchCmd = "echo '$nsswitchContent' > /data/local/tmp/nsswitch.conf"
+            val nsswitchCmd = "printf '%s\\n' ${ShellArgs.quote(nsswitchContent)} > ${ShellArgs.quote("$NMAP_DIR/nsswitch.conf")}"
             Runtime.getRuntime().exec(arrayOf("su", "-c", nsswitchCmd)).waitFor()
             //Log.d("NMAP_COPY", "Fichier nsswitch.conf créé")
 
@@ -237,17 +229,27 @@ class NetworkToolsViewModel : ViewModel() {
      * @param endPort port de fin de plage
      */
     fun scanPorts(host: String, startPort: Int, endPort: Int) {
+        if (startPort !in 1..65535 || endPort !in 1..65535 || startPort > endPort) {
+            _results.update { it + NetworkResult("Port scan $host", "Invalid port range: use 1-65535 with start <= end.", isError = true) }
+            return
+        }
+        if (endPort - startPort + 1 > MAX_PORTS_PER_SCAN) {
+            _results.update { it + NetworkResult("Port scan $host", "Range too large (max $MAX_PORTS_PER_SCAN ports per scan; a filtered range takes ~0.4 s per port).", isError = true) }
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             _isScanning.value = true
             val openPorts = mutableListOf<Int>()
 
             try {
+                // Résolution unique (auparavant refaite pour chaque port).
+                val address = InetAddress.getByName(host)
                 for (port in startPort..endPort) {
                     try {
                         // Timeout de connexion explicite : sans lui, un port filtré peut
                         // bloquer le scan très longtemps (timeout TCP par défaut de l'OS).
                         Socket().use { sock ->
-                            sock.connect(InetSocketAddress(host, port), 400)
+                            sock.connect(InetSocketAddress(address, port), 400)
                             openPorts.add(port)
                         }
                     } catch (e: Exception) {
@@ -325,121 +327,40 @@ class NetworkToolsViewModel : ViewModel() {
     fun traceroute(host: String) {
         viewModelScope.launch(Dispatchers.IO) {
             _isScanning.value = true
+            // Sans socket ICMP brute (root), Android ne permet pas de faire varier le TTL :
+            // ceci n'est PAS un traceroute, seulement un test d'accessibilité TCP de la cible.
+            val title = "TCP reachability $host"
             try {
                 val output = StringBuilder()
-                output.append("Traceroute to $host\n\n")
-
+                output.append("Note: not a hop-by-hop traceroute (needs raw ICMP / root).\n")
+                output.append("Testing TCP reachability of the target on common ports.\n\n")
                 val targetAddress = InetAddress.getByName(host)
                 output.append("Target address: ${targetAddress.hostAddress}\n\n")
-
-                // Special handling for localhost
-                if (targetAddress.hostAddress == "127.0.0.1" || host.lowercase() == "localhost") {
-                    output.append("Testing localhost connectivity...\n\n")
-                    
+                var reachable = false
+                for (port in listOf(80, 443, 22, 53, 21, 25, 110, 143, 993, 995)) {
+                    val start = System.currentTimeMillis()
                     try {
-                        val socket = Socket()
-                        socket.setSoTimeout(1000)
-                        
-                        val startTime = System.currentTimeMillis()
-                        socket.connect(InetSocketAddress("127.0.0.1", 8080), 1000)
-                        val endTime = System.currentTimeMillis()
-                        
-                        output.append("1: 127.0.0.1 (localhost) (${endTime - startTime}ms) [ACCESSIBLE]\n")
-                        socket.close()
-                        
-                        _results.value = _results.value + NetworkResult(
-                            command = "traceroute $host",
-                            output = output.toString(),
-                            isError = false
-                        )
-                    } catch (e: Exception) {
-                        output.append("1: 127.0.0.1 (localhost) [ACCESSIBLE]\n")
-
-                        _results.value = _results.value + NetworkResult(
-                            command = "traceroute $host",
-                            output = output.toString(),
-                            isError = false
-                        )
-                    }
-                }
-
-                val commonPorts = listOf(80, 443, 22, 21, 25, 53, 110, 143, 993, 995)
-                var reachedTarget = false
-                var hopCount = 0
-
-                for (port in commonPorts) {
-                    hopCount++
-                    try {
-                        val socket = Socket()
-                        socket.setSoTimeout(3000)
-                        
-                        val startTime = System.currentTimeMillis()
-                        
-                        // Tentative de connexion au port
-                        socket.connect(InetSocketAddress(targetAddress, port), 3000)
-                        
-                        val endTime = System.currentTimeMillis()
-                        val responseTime = endTime - startTime
-                        
-                        if (socket.isConnected) {
-                            output.append("$hopCount: ${socket.localAddress.hostAddress} -> ${targetAddress.hostAddress}:$port (${responseTime}ms) [OPEN]\n")
-                            reachedTarget = true
-                            socket.close()
-                            break
+                        Socket().use { socket ->
+                            socket.connect(InetSocketAddress(targetAddress, port), 2000)
+                            output.append("port $port: OPEN (${System.currentTimeMillis() - start} ms)\n")
                         }
-                        
-                        socket.close()
-                        
+                        reachable = true
+                        break
                     } catch (e: java.net.ConnectException) {
-                        // Port ferme mais accessible
-                        output.append("$hopCount: ${targetAddress.hostAddress}:$port [CLOSED]\n")
-                        reachedTarget = true
+                        // RST reçu : l'hôte répond, le port est fermé.
+                        output.append("port $port: CLOSED — host answered (${System.currentTimeMillis() - start} ms)\n")
+                        reachable = true
                         break
                     } catch (e: java.net.SocketTimeoutException) {
-                        output.append("$hopCount: * * * (timeout on port $port)\n")
+                        output.append("port $port: no answer (timeout)\n")
                     } catch (e: Exception) {
-                        output.append("$hopCount: * * * (error: ${e.message})\n")
+                        output.append("port $port: error (${e.message})\n")
                     }
                 }
-
-                // Si aucun port commun est valide alors connexion directe
-                if (!reachedTarget) {
-                    try {
-                        val socket = Socket()
-                        socket.setSoTimeout(5000)
-                        
-                        val startTime = System.currentTimeMillis()
-                        socket.connect(InetSocketAddress(targetAddress, 80), 5000)
-                        val endTime = System.currentTimeMillis()
-                        
-                        if (socket.isConnected) {
-                            output.append("${hopCount + 1}: ${socket.localAddress.hostAddress} -> ${targetAddress.hostAddress} (${endTime - startTime}ms) [ACCESSIBLE]\n")
-                            reachedTarget = true
-                            socket.close()
-                        }
-                        
-                    } catch (e: Exception) {
-                        output.append("${hopCount + 1}: * * * (host unreachable)\n")
-                    }
-                }
-
-                if (!reachedTarget) {
-                    output.append("Unable to reach destination\n")
-                } else {
-                    output.append("\nHost accessible\n")
-                }
-
-                _results.value = _results.value + NetworkResult(
-                    command = "traceroute $host",
-                    output = output.toString(),
-                    isError = !reachedTarget
-                )
+                output.append(if (reachable) "\nHost reachable over TCP\n" else "\nNo TCP answer on tested ports (host down or filtered)\n")
+                _results.update { it + NetworkResult(title, output.toString(), isError = !reachable) }
             } catch (e: Exception) {
-                _results.value = _results.value + NetworkResult(
-                    command = "traceroute $host",
-                    output = "Error: ${e.message}",
-                    isError = true
-                )
+                _results.update { it + NetworkResult(title, "Error: ${e.message}", isError = true) }
             } finally {
                 _isScanning.value = false
             }
@@ -457,96 +378,78 @@ class NetworkToolsViewModel : ViewModel() {
 
 
     fun nmap(host: String, parameters: String) {
+        val target = host.trim()
+        if (!ShellArgs.isValidTarget(target)) {
+            _results.update { it + NetworkResult("nmap", "Invalid target: use an IPv4/IPv6 address, CIDR or hostname.", isError = true) }
+            return
+        }
+        val opts = ShellArgs.splitSafeOptions(parameters)
+        if (opts == null) {
+            _results.update { it + NetworkResult("nmap", "Rejected options: shell characters, output/input files (-o*, -i*) and --script are not allowed.", isError = true) }
+            return
+        }
+        if (_isScanning.value) return
+        _isScanning.value = true
         viewModelScope.launch(Dispatchers.IO) {
-            _isScanning.value = true
+            val display = "nmap ${opts.ifEmpty { listOf("-sn") }.joinToString(" ")} $target"
             try {
-                val ctx = context ?: throw Exception("Contexte non initialisé")
-                val nmapDir = copyNmapToTmp(ctx)
-                val tmpDir = "/data/local/tmp"
+                if (!hasRoot()) {
+                    _results.update { it + NetworkResult(display, "Root access required to run the bundled nmap.", isError = true) }
+                    return@launch
+                }
+                val ctx = context ?: throw Exception("Context not initialized")
+                val prep = copyNmapToTmp(ctx)
+                if (prep.startsWith("ERROR")) {
+                    _results.update { it + NetworkResult(display, prep, isError = true) }
+                    return@launch
+                }
+                val dir = NMAP_DIR
+                val args = ShellArgs.join(opts.ifEmpty { listOf("-sn") } + target)
+                // exec : le shell su est remplacé par nmap ; chemin absolu pour pouvoir le tuer.
+                val fullCommand = "cd ${ShellArgs.quote(dir)} && LD_LIBRARY_PATH=${ShellArgs.quote(dir)} " +
+                    "RESOLV_CONF=${ShellArgs.quote("$dir/resolv.conf")} NSSWITCH_CONF=${ShellArgs.quote("$dir/nsswitch.conf")} " +
+                    "exec ${ShellArgs.quote("$dir/nmap")} $args"
 
-                // Utiliser des options par défaut si aucun paramètre n'est fourni
-                val defaultParams = if (parameters.isEmpty()) "-sn" else parameters
-                val fullCommand = "cd $tmpDir/ && LD_LIBRARY_PATH=$tmpDir/ RESOLV_CONF=$tmpDir/resolv.conf NSSWITCH_CONF=$tmpDir/nsswitch.conf ./nmap $defaultParams $host"
-                val command = arrayOf("su", "-c", fullCommand)
-
-                //Log.d("NMAP_EXEC", "Commande exécutée : $fullCommand")
-                //Log.d("NMAP_EXEC", "Répertoire courant : ${System.getProperty("user.dir")}")
-
-                val process = Runtime.getRuntime().exec(command)
-                val reader = BufferedReader(InputStreamReader(process.inputStream))
-                val errorReader = BufferedReader(InputStreamReader(process.errorStream))
-                // StringBuffer (synchronisé) : stdout et stderr sont lus par deux threads
-                // concurrents ; un StringBuilder non synchronisé pourrait corrompre/crasher.
+                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", fullCommand))
+                // StringBuffer (synchronisé) : stdout et stderr sont lus par deux threads.
                 val output = StringBuffer()
-
-                output.append("Command executed: $fullCommand\n\n")
-
-                // Lire la sortie standard
                 val outputThread = Thread {
-                    var line: String?
-                    while (reader.readLine().also { line = it } != null) {
-                        output.append(line).append("\n")
-                    }
-                }
-                outputThread.start()
-
-                // Lire la sortie d'erreur
+                    try { process.inputStream.bufferedReader().forEachLine { output.append(it).append("\n") } } catch (_: Exception) {}
+                }.apply { isDaemon = true; start() }
                 val errorThread = Thread {
-                    var line: String?
-                    while (errorReader.readLine().also { line = it } != null) {
-                        output.append("ERR: $line\n")
-                    }
+                    try { process.errorStream.bufferedReader().forEachLine { output.append("ERR: ").append(it).append("\n") } } catch (_: Exception) {}
+                }.apply { isDaemon = true; start() }
+
+                // Process.waitFor(timeout, unit) n'existe qu'en API 26 : attente active bornée.
+                val deadline = System.currentTimeMillis() + NMAP_TIMEOUT_MS
+                var exitCode: Int? = null
+                while (exitCode == null && System.currentTimeMillis() < deadline) {
+                    try { exitCode = process.exitValue() } catch (_: IllegalThreadStateException) { Thread.sleep(200) }
                 }
-                errorThread.start()
-
-                // Attendre la fin avec timeout
-                val timeout = 30000L // 30 secondes
-                val startTime = System.currentTimeMillis()
-                var exitCode = -1
-
-                while (System.currentTimeMillis() - startTime < timeout) {
-                    try {
-                        exitCode = process.waitFor()
-                        break
-                    } catch (e: InterruptedException) {
-                        process.destroy()
-                        output.append("\n[Timeout après ${timeout/1000} secondes]\n")
-                        break
-                    }
+                if (exitCode == null) {
+                    // Tuer nmap lui-même (le détruire via le client su ne suffit pas toujours).
+                    try { Runtime.getRuntime().exec(arrayOf("su", "-c", "pkill -f ${ShellArgs.quote("$dir/nmap")}")).waitFor() } catch (_: Exception) {}
+                    process.destroy()
+                    output.append("\n[Timeout after ${NMAP_TIMEOUT_MS / 1000} s — scan killed]\n")
                 }
-
-                // Attendre que les threads se terminent
                 outputThread.join(2000)
                 errorThread.join(2000)
-
-                // If no output, add a message
-                if (output.toString().trim().isEmpty() || output.toString().trim() == "Command executed: $fullCommand") {
-                    output.append("No output detected. Check that nmap is working correctly.\n")
-                }
-
-                _results.value = _results.value + NetworkResult(
-                    command = fullCommand,
-                    output = output.toString(),
-                    isError = exitCode != 0
-                )
+                if (output.isBlank()) output.append("No output from nmap.\n")
+                _results.update { it + NetworkResult(display, output.toString(), isError = exitCode != 0) }
             } catch (e: Exception) {
-                val message = if (e.message?.contains("No such file") == true || e.message?.contains("not found") == true) {
-                    "Error: nmap binary not found or copied. Check its presence in assets."
-                } else {
-                    e.message ?: "Error during nmap execution"
-                }
-                _results.value = _results.value + NetworkResult(
-                    command = "nmap $parameters $host",
-                    output = message,
-                    isError = true
-                )
+                _results.update { it + NetworkResult(display, e.message ?: "Error during nmap execution", isError = true) }
             } finally {
                 _isScanning.value = false
             }
         }
     }
 
-
+    private fun hasRoot(): Boolean = try {
+        val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
+        val out = p.inputStream.bufferedReader().readText()
+        p.waitFor()
+        out.contains("uid=0")
+    } catch (_: Exception) { false }
 
     /**
      * Wake-on-LAN : envoie un "magic packet" à l'adresse MAC fournie (broadcast UDP 9).

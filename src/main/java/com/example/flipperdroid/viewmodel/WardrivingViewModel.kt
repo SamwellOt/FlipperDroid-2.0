@@ -1,5 +1,7 @@
 package com.example.flipperdroid.viewmodel
 
+import com.example.flipperdroid.util.csvField
+
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Application
@@ -16,6 +18,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.flipperdroid.util.WifiChannels
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -43,6 +46,7 @@ data class WardriveEntry(
     val accuracy: Double
 )
 
+
 /**
  * Wardriving natif (inspiré d'Evil-M5Project) : combine le scan Wi-Fi et la
  * position GPS pour cartographier les réseaux, avec export au format Wigle CSV.
@@ -57,6 +61,10 @@ class WardrivingViewModel(app: Application) : AndroidViewModel(app) {
     private var wifiManager: WifiManager? = null
     private var locationManager: LocationManager? = null
 
+    /**
+     * Réseaux collectés, clé = BSSID. Écrit sur le thread principal (résultats de scan)
+     * et lu sur IO (export) : tout accès passe par synchronized(entriesMap).
+     */
     private val entriesMap = LinkedHashMap<String, WardriveEntry>()
 
     private val _entries = MutableStateFlow<List<WardriveEntry>>(emptyList())
@@ -68,15 +76,15 @@ class WardrivingViewModel(app: Application) : AndroidViewModel(app) {
     private val _status = MutableStateFlow("")
     val status: StateFlow<String> = _status
 
-    private var lastLocation: Location? = null
+    @Volatile private var lastLocation: Location? = null
     private var scanJob: Job? = null
     private var scanReceiver: BroadcastReceiver? = null
 
     private val locationListener = LocationListener { location -> lastLocation = location }
 
     fun initialize() {
-        wifiManager = context.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        wifiManager = context.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
     }
 
     private fun hasPermissions(): Boolean {
@@ -88,17 +96,25 @@ class WardrivingViewModel(app: Application) : AndroidViewModel(app) {
         if (_isRunning.value) return
         if (!hasPermissions()) { _status.value = "Location permission required"; return }
         initialize()
+        if (wifiManager == null) { _status.value = "Wi-Fi service unavailable"; return }
         _isRunning.value = true
         _status.value = "Wardriving started..."
 
-        // Mises à jour GPS
-        try {
-            locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener)
-            locationManager?.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 1000L, 0f, locationListener)
-            lastLocation = locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-                ?: locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-        } catch (e: Exception) {
-            Log.e("Wardriving", "Location error: ${e.message}")
+        // Mises à jour GPS : chaque fournisseur dans son propre try, un fournisseur
+        // absent ne doit pas empêcher l'autre.
+        val lm = locationManager
+        if (lm != null) {
+            for (provider in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
+                try {
+                    lm.requestLocationUpdates(provider, 1000L, 0f, locationListener)
+                } catch (e: Exception) {
+                    Log.e("Wardriving", "requestLocationUpdates($provider): ${e.message}")
+                }
+            }
+            lastLocation = lastKnown(lm, LocationManager.GPS_PROVIDER)
+                ?: lastKnown(lm, LocationManager.NETWORK_PROVIDER)
+        } else {
+            _status.value = "LocationManager unavailable: no GPS fix possible"
         }
 
         // Récepteur de résultats de scan
@@ -112,6 +128,9 @@ class WardrivingViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    private fun lastKnown(lm: LocationManager, provider: String): Location? =
+        try { lm.getLastKnownLocation(provider) } catch (e: Exception) { null }
 
     private fun registerScanReceiver() {
         scanReceiver = object : BroadcastReceiver() {
@@ -132,24 +151,29 @@ class WardrivingViewModel(app: Application) : AndroidViewModel(app) {
             val results = wifiManager?.scanResults ?: return
             val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
             var added = 0
-            for (r in results) {
-                if (r.BSSID.isNullOrEmpty()) continue
-                if (!entriesMap.containsKey(r.BSSID)) added++
-                entriesMap[r.BSSID] = WardriveEntry(
-                    mac = r.BSSID,
-                    ssid = r.SSID ?: "",
-                    auth = r.capabilities ?: "",
-                    firstSeen = timestamp,
-                    channel = frequencyToChannel(r.frequency),
-                    rssi = r.level,
-                    lat = loc.latitude,
-                    lon = loc.longitude,
-                    altitude = loc.altitude,
-                    accuracy = loc.accuracy.toDouble()
-                )
+            val snapshot = synchronized(entriesMap) {
+                for (r in results) {
+                    val bssid: String = r.BSSID?.takeIf { it.isNotEmpty() } ?: continue
+                    val previous = entriesMap[bssid]
+                    if (previous == null) added++
+                    entriesMap[bssid] = WardriveEntry(
+                        mac = bssid,
+                        ssid = r.SSID ?: "",
+                        auth = r.capabilities ?: "",
+                        // Première observation conservée lors des mises à jour.
+                        firstSeen = previous?.firstSeen ?: timestamp,
+                        channel = WifiChannels.frequencyToChannel(r.frequency),
+                        rssi = r.level,
+                        lat = loc.latitude,
+                        lon = loc.longitude,
+                        altitude = loc.altitude,
+                        accuracy = loc.accuracy.toDouble()
+                    )
+                }
+                entriesMap.values.toList()
             }
-            _entries.value = entriesMap.values.toList()
-            _status.value = "Networks: ${entriesMap.size} (+$added last scan)"
+            _entries.value = snapshot
+            _status.value = "Networks: ${snapshot.size} (+$added last scan)"
         } catch (e: SecurityException) {
             _status.value = "Permission error during scan"
         }
@@ -162,24 +186,36 @@ class WardrivingViewModel(app: Application) : AndroidViewModel(app) {
         try { locationManager?.removeUpdates(locationListener) } catch (_: Exception) {}
         try { scanReceiver?.let { context.unregisterReceiver(it) } } catch (_: Exception) {}
         scanReceiver = null
-        _status.value = "Stopped. ${entriesMap.size} networks collected."
+        val count = synchronized(entriesMap) { entriesMap.size }
+        _status.value = "Stopped. $count networks collected."
     }
 
     /** Exporte les réseaux au format Wigle CSV (WigleWifi-1.4). */
     fun exportCsv() {
-        if (entriesMap.isEmpty()) { _status.value = "Nothing to export"; return }
+        val hasEntries = synchronized(entriesMap) { entriesMap.isNotEmpty() }
+        if (!hasEntries) { _status.value = "Nothing to export"; return }
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val dir = getApplication<Application>().getExternalFilesDir("wardriving")
-                    ?: getApplication<Application>().filesDir
+                val app = getApplication<Application>()
+                val dir = app.getExternalFilesDir("wardriving") ?: app.filesDir
                 val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                 val file = File(dir, "wardrive_$ts.csv")
+                // Copie sous verrou : l'export ne doit pas itérer la map pendant un scan.
+                val snapshot = synchronized(entriesMap) { entriesMap.values.toList() }
                 val sb = StringBuilder()
                 sb.append("WigleWifi-1.4,appRelease=FlipperDroid,model=Android,release=Android,device=Android,display=,board=,brand=\n")
                 sb.append("MAC,SSID,AuthMode,FirstSeen,Channel,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,Type\n")
-                for (e in entriesMap.values) {
-                    val ssid = e.ssid.replace(",", " ")
-                    sb.append("${e.mac},$ssid,${e.auth},${e.firstSeen},${e.channel},${e.rssi},${e.lat},${e.lon},${e.altitude},${e.accuracy},WIFI\n")
+                for (e in snapshot) {
+                    sb.append(csvField(e.mac)).append(',')
+                        .append(csvField(e.ssid)).append(',')
+                        .append(csvField(e.auth)).append(',')
+                        .append(csvField(e.firstSeen)).append(',')
+                        .append(e.channel).append(',')
+                        .append(e.rssi).append(',')
+                        .append(e.lat).append(',')
+                        .append(e.lon).append(',')
+                        .append(e.altitude).append(',')
+                        .append(e.accuracy).append(",WIFI\n")
                 }
                 file.writeText(sb.toString())
                 withContext(Dispatchers.Main) { _status.value = "Exported: ${file.absolutePath}" }
@@ -187,13 +223,6 @@ class WardrivingViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.Main) { _status.value = "Export error: ${e.message}" }
             }
         }
-    }
-
-    private fun frequencyToChannel(freq: Int): Int = when {
-        freq == 2484 -> 14 // le canal 14 est un cas particulier (2484 MHz)
-        freq in 2412..2472 -> (freq - 2412) / 5 + 1
-        freq in 5170..5825 -> (freq - 5170) / 5 + 34
-        else -> 0
     }
 
     override fun onCleared() {

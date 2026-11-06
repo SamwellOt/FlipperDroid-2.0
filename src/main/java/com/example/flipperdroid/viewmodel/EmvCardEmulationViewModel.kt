@@ -31,11 +31,23 @@ class EmvCardEmulationViewModel(app: Application) : AndroidViewModel(app) {
         _capturedLabel.value = EmulationStore.label(getApplication<Application>())
     }
 
+    /**
+     * Services CardEmulation ; renseigne [_status] et renvoie null si indisponible
+     * (pas de NFC, ou appareil sans prise en charge HCE).
+     */
     private fun cardEmulation(): Pair<CardEmulation, ComponentName>? {
         val ctx = getApplication<Application>()
-        val adapter = NfcAdapter.getDefaultAdapter(ctx) ?: return null
-        return CardEmulation.getInstance(adapter) to
-            ComponentName(ctx, EmvCardEmulationService::class.java)
+        val adapter = NfcAdapter.getDefaultAdapter(ctx)
+        if (adapter == null) {
+            _status.value = "No NFC on this device."
+            return null
+        }
+        return try {
+            CardEmulation.getInstance(adapter) to ComponentName(ctx, EmvCardEmulationService::class.java)
+        } catch (e: UnsupportedOperationException) {
+            _status.value = "Card emulation (HCE) is not supported on this device."
+            null
+        }
     }
 
     fun startEmulation() {
@@ -45,8 +57,7 @@ class EmvCardEmulationViewModel(app: Application) : AndroidViewModel(app) {
             _status.value = "No captured ISO-DEP card. Capture one from NFC Reader first."
             return
         }
-        val ce = cardEmulation()
-        if (ce == null) { _status.value = "No NFC on this device."; return }
+        val ce = cardEmulation() ?: return
         val ok = try {
             ce.first.registerAidsForService(ce.second, CardEmulation.CATEGORY_OTHER, aids)
         } catch (e: Exception) { false }

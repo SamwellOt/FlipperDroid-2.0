@@ -65,7 +65,7 @@ fun NetcatScreen(
             }
 
             HorizontalDivider()
-            Text("HTTP file server (serves app files dir)", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+            Text("HTTP file server (serves only the app's served/ folder, no auth)", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(httpPort, { httpPort = it }, label = { Text("Port") }, singleLine = true, modifier = Modifier.weight(1f))
                 Button(onClick = { httpPort.toIntOrNull()?.let { viewModel.startHttp(it) } }) { Text("Start") }

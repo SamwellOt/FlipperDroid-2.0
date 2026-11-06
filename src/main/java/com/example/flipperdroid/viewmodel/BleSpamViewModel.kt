@@ -117,6 +117,13 @@ class BleSpamViewModel(app: Application) : AndroidViewModel(app) {
         handler.setAdvertisementSets(sets)
     }
 
+    override fun onCleared() {
+        super.onCleared()
+        // Le handler tourne sur le main looper : sans arrêt explicite, l'émission
+        // continuait après la destruction de l'activité.
+        stopSpam()
+    }
+
     fun setCheckedPayloads(checkedStates: List<Boolean>) {
         _selectedSets = _allAdvertisementSets.filterIndexed { idx, _ -> checkedStates.getOrNull(idx) == true }
     }

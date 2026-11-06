@@ -1,6 +1,7 @@
 package com.example.flipperdroid.viewmodel
 
 import android.nfc.Tag
+import android.nfc.tech.IsoDep
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.flipperdroid.nfc.EmvCardData
@@ -30,15 +31,18 @@ class EmvReaderViewModel : ViewModel() {
      * Lance la lecture de la carte NFC a partir du tag recu
      *
      * Met a jour l etat de lecture les donnees recuperees et les erreurs eventuelles
+     * Un tag qui n'est pas ISO-DEP est ignore silencieusement (ce n'est pas une carte EMV).
      *
      * @param tag tag NFC detecte par le systeme
      */
     fun readCard(tag: Tag) {
+        if (IsoDep.get(tag) == null) return
+        _cardData.value = null
         viewModelScope.launch {
             try {
                 _isReading.emit(true)
                 _error.emit(null)
-                
+
                 val data = emvCardReader.readCard(tag)
                 if (data != null) {
                     _cardData.emit(data)
@@ -68,4 +72,4 @@ class EmvReaderViewModel : ViewModel() {
             _error.emit(null)
         }
     }
-} 
+}

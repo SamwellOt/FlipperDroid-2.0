@@ -55,6 +55,7 @@ fun EmvReaderScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            val card = cardData
             when {
                 isReading -> {
                     /**
@@ -68,7 +69,7 @@ fun EmvReaderScreen(
                         textAlign = TextAlign.Center
                     )
                 }
-                cardData != null -> {
+                card != null -> {
                     /**
                      * Affichage des donnees si la lecture a reussi
                      */
@@ -78,7 +79,7 @@ fun EmvReaderScreen(
                         modifier = Modifier.size(48.dp),
                         tint = MaterialTheme.colorScheme.primary
                     )
-                    CardDataDisplay(cardData = cardData!!)
+                    CardDataDisplay(cardData = card)
                     Button(
                         onClick = { viewModel.clearData() },
                         modifier = Modifier.fillMaxWidth()

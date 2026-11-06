@@ -60,16 +60,9 @@ data class WifiNetwork(
             )
         }
 
-        fun frequencyToChannel(frequency: Int): Int {
-            return when {
-                // Canal 14 (Japon) est un cas particulier : 2484 MHz, hors de la
-                // grille régulière espacée de 5 MHz (2412..2472 = canaux 1..13).
-                frequency == 2484 -> 14
-                frequency in 2412..2472 -> (frequency - 2412) / 5 + 1
-                frequency in 5170..5825 -> (frequency - 5170) / 5 + 34
-                else -> 0
-            }
-        }
+        /** Délègue au calcul unique (2.4 / 5 / 6 GHz) de [com.example.flipperdroid.util.WifiChannels]. */
+        fun frequencyToChannel(frequency: Int): Int =
+            com.example.flipperdroid.util.WifiChannels.frequencyToChannel(frequency)
     }
 }
 
@@ -129,8 +122,9 @@ class WifiDeautherViewModel : ViewModel() {
      */
 
     fun initialize(context: Context) {
-        this.context = context
-        wifiManager = context.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        // Contexte applicatif : ce ViewModel vit dans MainActivity et survit aux recréations.
+        this.context = context.applicationContext
+        wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
         setupScanReceiver()
         checkPermissions()
     }
@@ -372,9 +366,11 @@ class WifiDeautherViewModel : ViewModel() {
 
             var rounds = 0
             while (isActive && _isDeauthing.value) {
-                runRootCommand(command)
+                val rc = runRootCommand(command)
                 rounds++
-                _deauthStatus.value = "Deauth burst #$rounds sent to ${network.bssid} via $tool"
+                // Statut honnête : un code de sortie non nul signifie que l'outil a échoué.
+                _deauthStatus.value = if (rc == 0) "Burst #$rounds: $tool exited OK"
+                    else "Burst #$rounds: $tool failed (exit $rc) — interface not in monitor mode?"
                 delay(1000)
             }
         }
@@ -483,14 +479,23 @@ class WifiDeautherViewModel : ViewModel() {
      * @return Enum representant le type de securite
      */
     fun getSecurityType(capabilities: String): SecurityType {
-        return when {
-            capabilities.contains("WEP") -> SecurityType.WEP
-            capabilities.contains("WPA3") -> SecurityType.WPA3
-            capabilities.contains("WPA2") -> SecurityType.WPA2
-            capabilities.contains("WPA") -> SecurityType.WPA
-            else -> SecurityType.OPEN
+        return when (com.example.flipperdroid.util.WifiSecurityClassifier.classify(capabilities)) {
+            com.example.flipperdroid.util.WifiSecurity.OPEN -> SecurityType.OPEN
+            com.example.flipperdroid.util.WifiSecurity.OWE -> SecurityType.OWE
+            com.example.flipperdroid.util.WifiSecurity.WEP -> SecurityType.WEP
+            com.example.flipperdroid.util.WifiSecurity.WPA -> SecurityType.WPA
+            com.example.flipperdroid.util.WifiSecurity.WPA2 -> SecurityType.WPA2
+            com.example.flipperdroid.util.WifiSecurity.WPA3 -> SecurityType.WPA3
+            com.example.flipperdroid.util.WifiSecurity.WPA3_TRANSITION -> SecurityType.WPA3_TRANSITION
         }
     }
+
+    /**
+     * Libellé de sécurité enrichi (WPA3-SAE, OWE, transition WPA2/WPA3), avec
+     * les drapeaux Entreprise (EAP) et WPS qui élargissent la surface d'attaque.
+     */
+    fun getSecurityLabel(capabilities: String): String =
+        com.example.flipperdroid.util.WifiSecurityClassifier.label(capabilities)
 }
 
 enum class NetworkStrength {
@@ -502,8 +507,10 @@ enum class NetworkStrength {
 
 enum class SecurityType {
     OPEN,
+    OWE,
     WEP,
     WPA,
     WPA2,
-    WPA3
+    WPA3,
+    WPA3_TRANSITION
 } 

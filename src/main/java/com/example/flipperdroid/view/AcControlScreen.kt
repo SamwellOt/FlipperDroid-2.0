@@ -46,7 +46,11 @@ fun AcControlScreen(
         "High" to AcProtocols.FAN_HIGH
     )
 
-    fun send() = viewModel.send(brand, power, mode, temp.toInt(), fan, swing)
+    // L'oscillation n'est transmise que si la marque l'encode (sinon elle est ignorée de toute façon).
+    fun send() = viewModel.send(brand, power, mode, temp.toInt(), fan, swing && brand.supportsSwing)
+
+    // Le mode "Fan" n'est proposé que pour les marques qui l'encodent réellement.
+    val availableModes = modes.filter { (_, value) -> value != AcProtocols.MODE_FAN || brand.supportsFanMode }
 
     Scaffold(
         topBar = {
@@ -89,16 +93,27 @@ fun AcControlScreen(
                     AcProtocols.Brand.values().forEach { b ->
                         DropdownMenuItem(
                             text = { Text(b.name) },
-                            onClick = { brand = b; brandMenu = false }
+                            onClick = {
+                                brand = b
+                                brandMenu = false
+                                // Mode Fan absent pour cette marque : on repasse sur Cool.
+                                if (mode == AcProtocols.MODE_FAN && !b.supportsFanMode) mode = AcProtocols.MODE_COOL
+                            }
                         )
                     }
                 }
             }
 
-            if (brand != AcProtocols.Brand.GREE) {
-                Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "⚠ Not verified on hardware — the frame structure is a reference. Field maps (mode/fan/temp) may differ on your unit.",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall
+            )
+            if (brand.approximateChecksum) {
+                Spacer(Modifier.height(4.dp))
                 Text(
-                    "⚠ Reference encoding — not verified on hardware. Field maps (mode/fan/temp) may differ on your unit.",
+                    "⚠ The checksum for this brand is an approximation: the unit may ignore the frame.",
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -118,7 +133,7 @@ fun AcControlScreen(
             Text("Mode", style = MaterialTheme.typography.labelLarge)
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                modes.forEach { (label, value) ->
+                availableModes.forEach { (label, value) ->
                     FilterChip(
                         selected = mode == value,
                         onClick = { mode = value },
@@ -153,7 +168,18 @@ fun AcControlScreen(
             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Text("Swing", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.width(12.dp))
-                Switch(checked = swing, onCheckedChange = { swing = it })
+                Switch(
+                    checked = swing,
+                    onCheckedChange = { swing = it },
+                    enabled = brand.supportsSwing
+                )
+            }
+            if (!brand.supportsSwing) {
+                Text(
+                    "Swing is not encoded for this brand.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             Spacer(Modifier.height(20.dp))
