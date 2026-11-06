@@ -14,6 +14,8 @@ import com.example.flipperdroid.model.enums.AdvertisementError
 import com.example.flipperdroid.model.enums.TxPowerLevel
 import com.example.flipperdroid.model.`interface`.IAdvertisementService
 import com.example.flipperdroid.model.`interface`.IAdvertisementServiceCallback
+import com.example.flipperdroid.model.`object`.AdvertisementPayload
+import com.example.flipperdroid.model.`object`.AdvertisementPayload.LEGACY_MAX_PAYLOAD_BYTES as LEGACY_MAX
 import com.example.flipperdroid.model.`object`.BluetoothHelpers.bluetoothAdapter
 
 class ModernAdvertisementService(
@@ -42,22 +44,36 @@ class ModernAdvertisementService(
             advertisementSet.advertisingSetParameters.txPowerLevel = _txPowerLevel!!
         }
         // Legacy vs étendu : le legacy plafonne la trame à 31 octets, d'où les échecs
-        // DATA_TOO_LARGE sur Apple Continuity / SwiftPair. On bascule en advertising
-        // ÉTENDU quand le payload dépasse 31 octets et qu'il n'y a pas de scan response
-        // (le scan response n'est pas compatible avec un set étendu non scannable).
+        // DATA_TOO_LARGE sur Apple Continuity / SwiftPair. MAIS la plupart des cibles
+        // (Windows Swift Pair, iOS/macOS Continuity, Android Fast Pair) n'écoutent QUE
+        // l'advertising legacy par défaut : une trame courte envoyée en étendu leur est
+        // invisible. On garde donc le LEGACY tant que la charge tient dans 31 octets
+        // (cas de l'immense majorité des payloads de spam) et on ne bascule en ÉTENDU
+        // que lorsqu'elle déborde réellement.
         val hasScanResponse = advertisementSet.scanResponse != null
         val extendedSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             _bluetoothAdapter?.isLeExtendedAdvertisingSupported == true
+        val data = advertisementSet.advertiseData
+        val estimatedBytes = AdvertisementPayload.estimateLegacyBytes(
+            connectable = advertisementSet.advertiseSettings.connectable,
+            includeDeviceName = data.includeDeviceName,
+            deviceNameLength = if (data.includeDeviceName) safeAdapterNameLength() else 0,
+            includeTxPower = data.includeTxPower,
+            manufacturerDataLengths = data.manufacturerData.map { it.manufacturerSpecificData.size },
+            service16Count = data.services.count { it.serviceUuid != null },
+            serviceData16Lengths = data.services.mapNotNull { it.serviceData?.size },
+        )
+        val overflowsLegacy = AdvertisementPayload.overflowsLegacy(estimatedBytes)
         val params = advertisementSet.advertisingSetParameters
-        // Advertising ÉTENDU dès qu'il est supporté (et sans scan response) : dépasse la limite
-        // legacy de 31 octets ET permet de garder UN set persistant dont on ne change que les
-        // données (voir updateAdvertisement) — plus de ré-enregistrement, donc plus de
-        // TOO_MANY_ADVERTISERS lors du spam.
-        if (extendedSupported && !hasScanResponse) {
+        if (extendedSupported && !hasScanResponse && overflowsLegacy) {
+            // Trame > 31 octets : on n'a pas le choix, advertising étendu (certaines cibles
+            // ne la recevront pas, mais le legacy la rejetterait avec DATA_TOO_LARGE).
+            Log.d(_logTag, "Payload ~$estimatedBytes B > $LEGACY_MAX — extended advertising (may be invisible to legacy-only scanners)")
             params.legacyMode = false
             params.connectable = advertisementSet.advertiseSettings.connectable
             params.scanable = false
         } else {
+            // Trame ≤ 31 octets : LEGACY, pour qu'elle soit réellement reçue par les cibles.
             params.legacyMode = true
             params.connectable = advertisementSet.advertiseSettings.connectable
             params.scanable = hasScanResponse
@@ -151,6 +167,13 @@ class ModernAdvertisementService(
 
     override fun isLegacyService(): Boolean {
         return false
+    }
+
+    // getName() peut lever SecurityException sur API 31+ sans BLUETOOTH_CONNECT.
+    private fun safeAdapterNameLength(): Int = try {
+        _bluetoothAdapter?.name?.length ?: 0
+    } catch (e: SecurityException) {
+        0
     }
 
     private fun getAdvertisingSetCallback(): AdvertisingSetCallback {

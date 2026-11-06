@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+Offensive-capability accuracy, continuing the `AUDIT_REPORT.md` pass.
+
+### BLE spam
+- BLE advertising now stays in **legacy** mode whenever the payload fits in the 31-byte limit, instead of always using extended advertising on capable chips (e.g. Pixel 7). Most targets (Windows Swift Pair, iOS/macOS Continuity, Android Fast Pair) only listen to legacy advertising by default, so short spam frames sent as extended were effectively invisible — this restores their reach. Extended advertising is used only when a frame genuinely overflows 31 bytes, and that fallback is logged. Payload size is computed by a pure, unit-tested estimator (`model/object/AdvertisementPayload`).
+
+### Wi-Fi recon
+- Network security classification recognises **WPA3 (SAE)**, **WPA2/WPA3 transition**, **Enhanced Open (OWE)**, **enterprise (EAP/802.1X)** and **WPS**, instead of only matching the literal "WPA3". A WPA3-only AP (`[RSN-SAE-CCMP]`) was previously reported as *Open*; OWE was reported as unencrypted *Open*. Logic extracted to a pure, unit-tested `util/WifiSecurity` classifier; the deauther list shows the enriched label with Enterprise/WPS flags.
+
+### Tests
+- New JVM suites `BleLogicTest` (advertising size / legacy-vs-extended) and Wi-Fi security cases in `NetLogicTest`.
+
 ## [2.2.0] - 2026-11-05
 
 Quality, reliability and security pass driven by `AUDIT_REPORT.md`.

@@ -3,8 +3,11 @@ package com.example.flipperdroid
 import com.example.flipperdroid.camera.OnvifTools
 import com.example.flipperdroid.iot.IotProtocolScanner
 import com.example.flipperdroid.util.WifiChannels
+import com.example.flipperdroid.util.WifiSecurity
+import com.example.flipperdroid.util.WifiSecurityClassifier
 import com.example.flipperdroid.util.csvField
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -142,5 +145,56 @@ class NetLogicTest {
         val response = "<s:Envelope><s:Body><GetUsersResponse>" +
             "<Username>DefaultUser</Username></GetUsersResponse></s:Body></s:Envelope>"
         assertNull(OnvifTools.soapFaultReason(response))
+    }
+
+    // --- Classification de la sécurité Wi-Fi ---
+
+    @Test
+    fun wifi_security_open_and_wep() {
+        assertEquals(WifiSecurity.OPEN, WifiSecurityClassifier.classify("[ESS]"))
+        assertEquals(WifiSecurity.WEP, WifiSecurityClassifier.classify("[WEP][ESS]"))
+    }
+
+    @Test
+    fun wifi_security_wpa_variants() {
+        assertEquals(WifiSecurity.WPA, WifiSecurityClassifier.classify("[WPA-PSK-TKIP][ESS]"))
+        assertEquals(WifiSecurity.WPA2, WifiSecurityClassifier.classify("[WPA2-PSK-CCMP][ESS]"))
+        assertEquals(WifiSecurity.WPA2, WifiSecurityClassifier.classify("[RSN-PSK-CCMP][ESS]"))
+    }
+
+    @Test
+    fun wifi_security_wpa3_sae_not_open() {
+        // Un WPA3 pur (SAE, sans littéral "WPA3") était auparavant classé OPEN.
+        assertEquals(WifiSecurity.WPA3, WifiSecurityClassifier.classify("[RSN-SAE-CCMP][ESS]"))
+    }
+
+    @Test
+    fun wifi_security_wpa3_transition() {
+        assertEquals(
+            WifiSecurity.WPA3_TRANSITION,
+            WifiSecurityClassifier.classify("[WPA2-PSK-CCMP][RSN-SAE-CCMP][ESS]")
+        )
+    }
+
+    @Test
+    fun wifi_security_owe_is_encrypted_open() {
+        assertEquals(WifiSecurity.OWE, WifiSecurityClassifier.classify("[RSN-OWE-CCMP][ESS]"))
+    }
+
+    @Test
+    fun wifi_security_wps_and_enterprise_flags() {
+        val caps = "[WPA2-EAP-CCMP][WPS][ESS]"
+        assertTrue(WifiSecurityClassifier.hasWps(caps))
+        assertTrue(WifiSecurityClassifier.isEnterprise(caps))
+        assertFalse(WifiSecurityClassifier.hasWps("[WPA2-PSK-CCMP][ESS]"))
+        assertFalse(WifiSecurityClassifier.isEnterprise("[WPA2-PSK-CCMP][ESS]"))
+    }
+
+    @Test
+    fun wifi_security_label_enriched() {
+        assertEquals("WPA2 · Enterprise · WPS", WifiSecurityClassifier.label("[WPA2-EAP-CCMP][WPS][ESS]"))
+        assertEquals("WPA2/WPA3", WifiSecurityClassifier.label("[WPA2-PSK-CCMP][RSN-SAE-CCMP][ESS]"))
+        assertEquals("Enhanced Open (OWE)", WifiSecurityClassifier.label("[RSN-OWE-CCMP][ESS]"))
+        assertEquals("Open", WifiSecurityClassifier.label("[ESS]"))
     }
 }

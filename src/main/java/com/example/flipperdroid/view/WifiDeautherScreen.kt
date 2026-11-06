@@ -303,7 +303,7 @@ fun NetworkCard(
     viewModel: WifiDeautherViewModel
 ) {
     val networkStrength = viewModel.getNetworkStrength(network.rssi)
-    val securityType = viewModel.getSecurityType(network.capabilities)
+    val securityLabel = viewModel.getSecurityLabel(network.capabilities)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -368,7 +368,7 @@ fun NetworkCard(
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = securityType.name,
+                        text = securityLabel,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

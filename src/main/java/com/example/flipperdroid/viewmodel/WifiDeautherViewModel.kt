@@ -479,14 +479,23 @@ class WifiDeautherViewModel : ViewModel() {
      * @return Enum representant le type de securite
      */
     fun getSecurityType(capabilities: String): SecurityType {
-        return when {
-            capabilities.contains("WEP") -> SecurityType.WEP
-            capabilities.contains("WPA3") -> SecurityType.WPA3
-            capabilities.contains("WPA2") -> SecurityType.WPA2
-            capabilities.contains("WPA") -> SecurityType.WPA
-            else -> SecurityType.OPEN
+        return when (com.example.flipperdroid.util.WifiSecurityClassifier.classify(capabilities)) {
+            com.example.flipperdroid.util.WifiSecurity.OPEN -> SecurityType.OPEN
+            com.example.flipperdroid.util.WifiSecurity.OWE -> SecurityType.OWE
+            com.example.flipperdroid.util.WifiSecurity.WEP -> SecurityType.WEP
+            com.example.flipperdroid.util.WifiSecurity.WPA -> SecurityType.WPA
+            com.example.flipperdroid.util.WifiSecurity.WPA2 -> SecurityType.WPA2
+            com.example.flipperdroid.util.WifiSecurity.WPA3 -> SecurityType.WPA3
+            com.example.flipperdroid.util.WifiSecurity.WPA3_TRANSITION -> SecurityType.WPA3_TRANSITION
         }
     }
+
+    /**
+     * Libellé de sécurité enrichi (WPA3-SAE, OWE, transition WPA2/WPA3), avec
+     * les drapeaux Entreprise (EAP) et WPS qui élargissent la surface d'attaque.
+     */
+    fun getSecurityLabel(capabilities: String): String =
+        com.example.flipperdroid.util.WifiSecurityClassifier.label(capabilities)
 }
 
 enum class NetworkStrength {
@@ -498,8 +507,10 @@ enum class NetworkStrength {
 
 enum class SecurityType {
     OPEN,
+    OWE,
     WEP,
     WPA,
     WPA2,
-    WPA3
+    WPA3,
+    WPA3_TRANSITION
 } 
